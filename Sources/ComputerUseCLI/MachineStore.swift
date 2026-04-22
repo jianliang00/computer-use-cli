@@ -1,3 +1,4 @@
+import ContainerBridge
 import Foundation
 
 public struct MachineMetadata: Codable, Equatable, Sendable {
@@ -33,6 +34,48 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
+
+    func updating(
+        sandboxID: String? = nil,
+        hostPort: Int? = nil,
+        status: Status? = nil,
+        updatedAt: Date
+    ) -> MachineMetadata {
+        MachineMetadata(
+            name: name,
+            imageReference: imageReference,
+            sandboxID: sandboxID ?? self.sandboxID,
+            hostPort: hostPort ?? self.hostPort,
+            status: status ?? self.status,
+            createdAt: createdAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func updating(
+        from sandbox: SandboxDetails,
+        updatedAt: Date
+    ) -> MachineMetadata {
+        updating(
+            sandboxID: sandbox.sandboxID,
+            hostPort: sandbox.publishedHostPort,
+            status: .init(sandbox.status),
+            updatedAt: updatedAt
+        )
+    }
+}
+
+extension MachineMetadata.Status {
+    init(_ sandboxStatus: SandboxDetails.Status) {
+        switch sandboxStatus {
+        case .created:
+            self = .created
+        case .running:
+            self = .running
+        case .stopped:
+            self = .stopped
+        }
+    }
 }
 
 public struct MachineMetadataStore {
@@ -58,6 +101,7 @@ public struct MachineMetadataStore {
         encoder.outputFormatting = [
             .prettyPrinted,
             .sortedKeys,
+            .withoutEscapingSlashes,
         ]
         encoder.dateEncodingStrategy = .iso8601
         self.encoder = encoder

@@ -7,13 +7,18 @@ public struct CommandLineTool {
     public init(
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil,
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        containerBridge: any ContainerRuntimeBridging = ContainerCLIBridge()
     ) {
         let store = MachineMetadataStore(
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
-        self.machineService = MachineService(store: store, now: now)
+        self.machineService = MachineService(
+            store: store,
+            containerBridge: containerBridge,
+            now: now
+        )
     }
 
     public func run(arguments: [String]) throws -> String {
@@ -49,18 +54,28 @@ public struct CommandLineTool {
                 requestedHostPort: requestedPort
             )
             return try JSONOutput.render(metadata)
+        case "start":
+            let name = try flags.requiredValue(for: "--machine")
+            let metadata = try machineService.start(name: name)
+            return try JSONOutput.render(metadata)
         case "inspect":
             let name = try flags.requiredValue(for: "--machine")
             let metadata = try machineService.inspect(name: name)
             return try JSONOutput.render(metadata)
+        case "stop":
+            let name = try flags.requiredValue(for: "--machine")
+            let metadata = try machineService.stop(name: name)
+            return try JSONOutput.render(metadata)
+        case "logs":
+            let name = try flags.requiredValue(for: "--machine")
+            let logs = try machineService.logs(name: name)
+            return logs.entries.joined(separator: "\n")
         case "list":
             return try JSONOutput.render(machineService.list())
         case "rm":
             let name = try flags.requiredValue(for: "--machine")
             try machineService.remove(name: name)
             return "removed \(name)"
-        case "start", "stop", "logs":
-            throw CLIError.notImplemented("machine \(subcommand)")
         default:
             throw CLIError.unknownSubcommand("machine", subcommand)
         }
@@ -70,8 +85,11 @@ public struct CommandLineTool {
         """
         Usage:
           computer-use machine create --name <name> --image <image> [--host-port <port>]
+          computer-use machine start --machine <name>
           computer-use machine inspect --machine <name>
+          computer-use machine stop --machine <name>
           computer-use machine list
+          computer-use machine logs --machine <name>
           computer-use machine rm --machine <name>
         """
     }
@@ -142,7 +160,6 @@ public enum CLIError: Error, LocalizedError, Equatable {
     case unexpectedArgument(String)
     case missingValue(String)
     case invalidIntegerFlag(String, String)
-    case notImplemented(String)
 
     public var errorDescription: String? {
         switch self {
@@ -158,8 +175,6 @@ public enum CLIError: Error, LocalizedError, Equatable {
             "missing value for \(flag)"
         case let .invalidIntegerFlag(flag, value):
             "invalid integer value \(value) for \(flag)"
-        case let .notImplemented(feature):
-            "\(feature) is not implemented yet"
         }
     }
 }
