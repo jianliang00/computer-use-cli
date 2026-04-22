@@ -1,0 +1,82 @@
+// swift-tools-version: 6.0
+
+import PackageDescription
+
+let package = Package(
+    name: "computer-use-cli",
+    platforms: [
+        .macOS(.v15),
+    ],
+    products: [
+        .library(name: "ComputerUseCLI", targets: ["ComputerUseCLI"]),
+        .executable(name: "computer-use", targets: ["computer-use"]),
+        .library(name: "ContainerBridge", targets: ["ContainerBridge"]),
+        .library(name: "AgentProtocol", targets: ["AgentProtocol"]),
+        .library(name: "BootstrapAgent", targets: ["BootstrapAgent"]),
+        .library(name: "ComputerUseAgentApp", targets: ["ComputerUseAgentApp"]),
+        .library(name: "ComputerUseAgentCore", targets: ["ComputerUseAgentCore"]),
+    ],
+    targets: [
+        .target(
+            name: "ComputerUseCLI",
+            dependencies: [
+                "ContainerBridge",
+            ]
+        ),
+        .executableTarget(
+            name: "computer-use",
+            dependencies: [
+                "ComputerUseCLI",
+            ],
+            path: "Sources/computer-use"
+        ),
+        .target(name: "ContainerBridge"),
+        .target(name: "AgentProtocol"),
+        .target(
+            name: "BootstrapAgent",
+            dependencies: [
+                "AgentProtocol",
+            ]
+        ),
+        .target(
+            name: "ComputerUseAgentCore",
+            dependencies: [
+                "AgentProtocol",
+            ]
+        ),
+        .target(
+            name: "ComputerUseAgentApp",
+            dependencies: [
+                "AgentProtocol",
+                "ComputerUseAgentCore",
+            ]
+        ),
+        .testTarget(
+            name: "ComputerUseCLITests",
+            dependencies: [
+                "ComputerUseCLI",
+            ]
+        ),
+        .testTarget(
+            name: "ContainerBridgeTests",
+            dependencies: [
+                "ContainerBridge",
+            ]
+        ),
+        .testTarget(
+            name: "AgentProtocolTests",
+            dependencies: [
+                "AgentProtocol",
+            ]
+        ),
+        .testTarget(
+            name: "ComputerUseAgentCoreTests",
+            dependencies: [
+                "AgentProtocol",
+                "BootstrapAgent",
+                "ComputerUseAgentApp",
+                "ComputerUseAgentCore",
+            ]
+        ),
+    ]
+)
