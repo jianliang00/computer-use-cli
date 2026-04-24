@@ -29,12 +29,18 @@
   - `apps list`
   - `state get`
   - `action click/type/key/drag/scroll/set-value/action`
+- guest 侧已具备 `computer-use-agent` 可执行入口和 HTTP server/router
+- `GET /health`、`GET /permissions`、`GET /apps` 已通过本机 smoke 验证
+- `/permissions` 使用 macOS Accessibility 与 Screen Recording API 检测真实授权状态
+- `/apps` 使用 `NSWorkspace` 枚举运行中 GUI app，并标记 frontmost app
+- `POST /state` 已可通过 ScreenCaptureKit 返回 PNG screenshot，并通过 AX API 返回基础 AX tree
+- 坐标 `click`、`type`、`key`、`drag`、`scroll` 已接入 CoreGraphics 事件执行器
 
 尚未完成：
 
-- guest 内 `ComputerUseAgent.app` HTTP server
-- 真实 Accessibility / Screen Recording 权限检测
-- 真实应用枚举、截图、AX tree、snapshot cache 和输入动作执行
+- `/Applications/ComputerUseAgent.app` bundle 包装、Info.plist 与固定 bundle id 安装
+- snapshot cache 与 element_id 反查
+- 元素 click、`set-value`、`action` 的 AX 元素执行
 - bootstrap agent 的状态刷新与持久化实现
 - macOS image 安装层、authorized image 流程和端到端验证
 
@@ -159,7 +165,7 @@
   - `GET /health` 返回 `200`
   - 日志写入 `/Users/admin/Library/Logs/ComputerUseAgent.log`
 
-- [ ] T07 实现权限检测
+- [x] T07 实现权限检测
   目标：
   明确 Accessibility 与 Screen Recording 的可用状态。
 
@@ -173,7 +179,7 @@
   - 权限缺失时不继续执行动作
   - 错误返回统一使用协议中定义的错误码
 
-- [ ] T08 实现 `/apps`
+- [x] T08 实现 `/apps`
   目标：
   枚举用户会话中的可见应用。
 

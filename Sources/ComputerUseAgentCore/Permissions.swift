@@ -1,3 +1,6 @@
+import ApplicationServices
+import CoreGraphics
+
 public enum AgentPermission: String, Codable, CaseIterable, Sendable {
     case accessibility
     case screenRecording
@@ -42,4 +45,15 @@ public struct PermissionSnapshot: Codable, Equatable, Sendable {
 
 public protocol PermissionStatusProviding: Sendable {
     func currentPermissions() async throws -> PermissionSnapshot
+}
+
+public struct MacOSPermissionStatusProvider: PermissionStatusProviding {
+    public init() {}
+
+    public func currentPermissions() async throws -> PermissionSnapshot {
+        PermissionSnapshot(
+            accessibility: AXIsProcessTrusted() ? .authorized : .denied,
+            screenRecording: CGPreflightScreenCaptureAccess() ? .authorized : .denied
+        )
+    }
 }

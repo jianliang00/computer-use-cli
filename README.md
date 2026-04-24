@@ -35,13 +35,21 @@ forwarding computer-use commands to a session agent running inside the guest.
   - `computer-use action scroll --machine <name> --snapshot-id <id> --element-id <id> --direction <up|down|left|right> [--pages <n>]`
   - `computer-use action set-value --machine <name> --snapshot-id <id> --element-id <id> --value <value>`
   - `computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>`
+- `computer-use-agent` starts a guest-side HTTP server on port `7777`.
+- The session agent implements:
+  - `GET /health`
+  - `GET /permissions` using macOS Accessibility and Screen Recording checks
+  - `GET /apps` using `NSWorkspace`
+  - `POST /state` using ScreenCaptureKit for PNG screenshots and AX APIs for
+    a basic accessibility tree
+  - coordinate `click`, `type`, `key`, `drag`, and `scroll` through CoreGraphics
 
 ## Remaining Work
 
-- Implement the guest `ComputerUseAgent.app` HTTP server.
-- Implement real Accessibility and Screen Recording permission checks.
-- Implement real running app enumeration, screenshots, AX tree capture, snapshot
-  cache, and UI input/action execution.
+- Package `computer-use-agent` as `/Applications/ComputerUseAgent.app` with the
+  fixed bundle identifier.
+- Implement snapshot cache and element lookup.
+- Implement element click, `set-value`, and AX `action` execution.
 - Implement bootstrap status refresh/persistence.
 - Add macOS image build/install assets, authorized image flow, and end-to-end
   validation.
