@@ -20,6 +20,7 @@ let package = Package(
         .target(
             name: "ComputerUseCLI",
             dependencies: [
+                "AgentProtocol",
                 "ContainerBridge",
             ]
         ),
@@ -54,6 +55,7 @@ let package = Package(
         .testTarget(
             name: "ComputerUseCLITests",
             dependencies: [
+                "AgentProtocol",
                 "ComputerUseCLI",
             ]
         ),

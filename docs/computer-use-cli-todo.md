@@ -13,9 +13,34 @@
 - 能执行 `click`、`type`、`key`、`drag`、`scroll`、`set-value`、`action`
 - 权限缺失时能返回明确错误
 
+## 当前验证状态
+
+已通过 `swift test` 验证：
+
+- SwiftPM 工程、库目标、可执行目标和测试目标可编译
+- machine metadata 可创建、读取、更新、删除，并能检测 host port 冲突
+- `ContainerBridge` 可构造 `container` 生命周期命令、解析 inspect JSON、读取 logs
+- `machine create/start/inspect/stop/list/logs/rm` 已接入 metadata 与 bridge
+- agent HTTP 协议模型可稳定 encode/decode
+- host 侧已具备 Agent HTTP client 与 CLI 转发命令：
+  - `agent ping`
+  - `agent doctor`
+  - `permissions get`
+  - `apps list`
+  - `state get`
+  - `action click/type/key/drag/scroll/set-value/action`
+
+尚未完成：
+
+- guest 内 `ComputerUseAgent.app` HTTP server
+- 真实 Accessibility / Screen Recording 权限检测
+- 真实应用枚举、截图、AX tree、snapshot cache 和输入动作执行
+- bootstrap agent 的状态刷新与持久化实现
+- macOS image 安装层、authorized image 流程和端到端验证
+
 ## 任务清单
 
-- [ ] T01 初始化工程骨架
+- [x] T01 初始化工程骨架
   目标：
   建立 Swift Package、目录结构和测试目标。
 
@@ -33,7 +58,7 @@
   - `swift build` 成功
   - `swift test` 成功
 
-- [ ] T02 定义 machine metadata 模型与本地存储
+- [x] T02 定义 machine metadata 模型与本地存储
   目标：
   固定 host 侧 machine 状态的唯一来源。
 
@@ -54,7 +79,7 @@
   - 对同一台 machine 重复执行读取时结果稳定
   - host port 冲突可检测并返回明确错误
 
-- [ ] T03 实现 `ContainerBridge`
+- [x] T03 实现 `ContainerBridge`
   目标：
   把所有 `container` 交互收口到一个模块中。
 
@@ -71,7 +96,7 @@
   - 有单元测试或最小集成测试覆盖 machine 生命周期主路径
   - 上层 CLI 不直接调用散落的 `ContainerKit` / `ContainerClient`
 
-- [ ] T04 实现 machine 命令
+- [x] T04 实现 machine 命令
   目标：
   打通 guest 生命周期闭环。
 
@@ -89,7 +114,7 @@
   - `machine inspect` 能返回 sandbox id、image、host port、status
   - `machine logs` 能返回 container 侧日志位置或内容
 
-- [ ] T05 定义 agent HTTP 协议
+- [x] T05 定义 agent HTTP 协议
   目标：
   固定 host 和 guest 之间的通信契约。
 

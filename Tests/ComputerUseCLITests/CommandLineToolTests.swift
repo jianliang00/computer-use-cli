@@ -1,3 +1,4 @@
+import AgentProtocol
 import ComputerUseCLI
 import ContainerBridge
 import Foundation
@@ -109,6 +110,93 @@ func machineLifecycleCommandsUseTheBridge() throws {
         "--machine", "demo",
     ])
     #expect(removed == "removed demo")
+}
+
+@Test
+func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = StubContainerBridge()
+    let agentClient = StubAgentClient()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_250) },
+        containerBridge: bridge,
+        agentClient: agentClient
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    let ping = try tool.run(arguments: [
+        "agent",
+        "ping",
+        "--machine", "demo",
+    ])
+    #expect(ping.contains("\"version\" : \"0.1.0\""))
+
+    let permissions = try tool.run(arguments: [
+        "permissions",
+        "get",
+        "--machine", "demo",
+    ])
+    #expect(permissions.contains("\"screen_recording\" : false"))
+
+    let apps = try tool.run(arguments: [
+        "apps",
+        "list",
+        "--machine", "demo",
+    ])
+    #expect(apps.contains("\"bundle_id\" : \"com.apple.TextEdit\""))
+
+    let state = try tool.run(arguments: [
+        "state",
+        "get",
+        "--machine", "demo",
+        "--bundle-id", "com.apple.TextEdit",
+    ])
+    #expect(state.contains("\"snapshot_id\" : \"snap-001\""))
+    #expect(agentClient.stateRequests == [StateRequest(bundleID: "com.apple.TextEdit")])
+
+    _ = try tool.run(arguments: [
+        "action",
+        "click",
+        "--machine", "demo",
+        "--x", "100",
+        "--y", "200",
+    ])
+    #expect(agentClient.clickRequests == [
+        ClickActionRequest(target: .coordinates(Point(x: 100, y: 200)))
+    ])
+
+    _ = try tool.run(arguments: [
+        "action",
+        "type",
+        "--machine", "demo",
+        "--",
+        "hello",
+        "world",
+    ])
+    #expect(agentClient.typeRequests == [TypeActionRequest(text: "hello world")])
+
+    let doctor = try tool.run(arguments: [
+        "agent",
+        "doctor",
+        "--machine", "demo",
+    ])
+    #expect(doctor.contains("\"bootstrap_ready\" : null"))
+    #expect(doctor.contains("\"session_agent_ready\" : true"))
+
+    #expect(agentClient.baseURLs.allSatisfy { $0.absoluteString == "http://127.0.0.1:46000" })
 }
 
 @Test
@@ -252,6 +340,84 @@ private final class StubContainerBridge: ContainerRuntimeBridging, @unchecked Se
             publishedHostPort: 46000,
             status: status
         )
+    }
+}
+
+private final class StubAgentClient: AgentClienting, @unchecked Sendable {
+    private(set) var baseURLs: [URL] = []
+    private(set) var stateRequests: [StateRequest] = []
+    private(set) var clickRequests: [ClickActionRequest] = []
+    private(set) var typeRequests: [TypeActionRequest] = []
+
+    func health(baseURL: URL) throws -> HealthResponse {
+        baseURLs.append(baseURL)
+        return HealthResponse(ok: true, version: "0.1.0")
+    }
+
+    func permissions(baseURL: URL) throws -> PermissionsResponse {
+        baseURLs.append(baseURL)
+        return PermissionsResponse(accessibility: true, screenRecording: false)
+    }
+
+    func apps(baseURL: URL) throws -> AppsResponse {
+        baseURLs.append(baseURL)
+        return AppsResponse(apps: [
+            RunningApplication(
+                bundleID: "com.apple.TextEdit",
+                name: "TextEdit",
+                pid: 123,
+                isFrontmost: true
+            ),
+        ])
+    }
+
+    func state(baseURL: URL, request: StateRequest) throws -> StateResponse {
+        baseURLs.append(baseURL)
+        stateRequests.append(request)
+        return StateResponse(
+            snapshotID: "snap-001",
+            app: ApplicationDescriptor(bundleID: "com.apple.TextEdit", name: "TextEdit", pid: 123),
+            window: nil,
+            screenshot: ScreenshotPayload(mimeType: "image/png", base64: "ZmFrZQ=="),
+            axTree: AXTree(rootID: "root", nodes: [])
+        )
+    }
+
+    func click(baseURL: URL, request: ClickActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        clickRequests.append(request)
+        return ActionResponse()
+    }
+
+    func type(baseURL: URL, request: TypeActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        typeRequests.append(request)
+        return ActionResponse()
+    }
+
+    func key(baseURL: URL, request: KeyActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        return ActionResponse()
+    }
+
+    func drag(baseURL: URL, request: DragActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        return ActionResponse()
+    }
+
+    func scroll(baseURL: URL, request: ScrollActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        return ActionResponse()
+    }
+
+    func setValue(baseURL: URL, request: SetValueActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        return ActionResponse()
+    }
+
+    func perform(baseURL: URL, request: ElementActionRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        return ActionResponse()
     }
 }
 
