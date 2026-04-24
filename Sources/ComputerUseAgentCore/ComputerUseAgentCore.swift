@@ -25,12 +25,16 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
         permissionProvider: any PermissionStatusProviding = MacOSPermissionStatusProvider(),
         applicationLister: any RunningApplicationListing = WorkspaceRunningApplicationLister(),
         stateCapturer: (any StateCapturing)? = nil,
-        actionPerformer: any ActionPerforming = MacOSActionPerformer()
+        actionPerformer: (any ActionPerforming)? = nil
     ) {
+        let elementCache = MacOSSnapshotElementCache()
         self.permissionProvider = permissionProvider
         self.applicationLister = applicationLister
-        self.stateCapturer = stateCapturer ?? MacOSStateCapturer(applicationLister: applicationLister)
-        self.actionPerformer = actionPerformer
+        self.stateCapturer = stateCapturer ?? MacOSStateCapturer(
+            applicationLister: applicationLister,
+            elementCache: elementCache
+        )
+        self.actionPerformer = actionPerformer ?? MacOSActionPerformer(elementCache: elementCache)
     }
 
     public func currentPermissions() async throws -> PermissionSnapshot {

@@ -42,14 +42,15 @@ forwarding computer-use commands to a session agent running inside the guest.
   - `GET /apps` using `NSWorkspace`
   - `POST /state` using ScreenCaptureKit for PNG screenshots and AX APIs for
     a basic accessibility tree
-  - coordinate `click`, `type`, `key`, `drag`, and `scroll` through CoreGraphics
+  - snapshot cache with 8-snapshot capacity and 60-second TTL
+  - `click`, `type`, `key`, `drag`, and `scroll` through CoreGraphics
+  - `set-value` and AX `action` through cached snapshot elements
 
 ## Remaining Work
 
 - Package `computer-use-agent` as `/Applications/ComputerUseAgent.app` with the
   fixed bundle identifier.
-- Implement snapshot cache and element lookup.
-- Implement element click, `set-value`, and AX `action` execution.
+- Run end-to-end action validation against TextEdit, Finder, and Safari.
 - Implement bootstrap status refresh/persistence.
 - Add macOS image build/install assets, authorized image flow, and end-to-end
   validation.

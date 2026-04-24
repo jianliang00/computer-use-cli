@@ -61,8 +61,22 @@ func sessionAgentHTTPRouterMapsStateAndActions() async throws {
     )
     let clickResponse = await router.handle(clickRequest)
     #expect(clickResponse.statusCode == 200)
+
+    let elementClickRequest = SessionAgentHTTPRequest(
+        method: .post,
+        path: "/actions/click",
+        body: try AgentProtocolJSON.encode(AgentProtocol.ClickActionRequest(
+            target: .element(AgentProtocol.SnapshotElementReference(
+                snapshotID: "snap-001",
+                elementID: "text"
+            ))
+        ))
+    )
+    let elementClickResponse = await router.handle(elementClickRequest)
+    #expect(elementClickResponse.statusCode == 200)
     #expect(agent.clicks == [
-        ComputerUseAgentCore.ClickActionRequest(location: ComputerUseAgentCore.Point(x: 10, y: 20))
+        ComputerUseAgentCore.ClickActionRequest(location: ComputerUseAgentCore.Point(x: 10, y: 20)),
+        ComputerUseAgentCore.ClickActionRequest(snapshotID: "snap-001", elementID: "text"),
     ])
 }
 

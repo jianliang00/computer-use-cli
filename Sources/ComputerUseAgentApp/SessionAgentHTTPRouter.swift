@@ -89,6 +89,8 @@ public final class SessionAgentHTTPRouter: Sendable {
             }
         } catch let routeError as SessionAgentHTTPRouteError {
             return routeError.response()
+        } catch let cacheError as SnapshotCacheError {
+            return snapshotCacheError(cacheError)
         } catch let coreError as ComputerUseAgentCoreError {
             return unsupported(coreError.localizedDescription)
         } catch let decodingError as DecodingError {
@@ -162,8 +164,14 @@ public final class SessionAgentHTTPRouter: Sendable {
                 clickCount: action.clickCount
             ))
             return try json(ActionResponse())
-        case .element:
-            throw ComputerUseAgentCoreError.unsupportedAction("element click")
+        case let .element(reference):
+            _ = try await agent.click(ComputerUseAgentCore.ClickActionRequest(
+                snapshotID: reference.snapshotID,
+                elementID: reference.elementID,
+                button: ComputerUseAgentCore.MouseButton(rawValue: action.button.rawValue) ?? .left,
+                clickCount: action.clickCount
+            ))
+            return try json(ActionResponse())
         }
     }
 
@@ -202,7 +210,8 @@ public final class SessionAgentHTTPRouter: Sendable {
         let action = try decode(AgentProtocol.SetValueActionRequest.self, from: request)
         _ = try await agent.setValue(ComputerUseAgentCore.SetValueActionRequest(
             elementID: action.target.elementID,
-            value: action.value
+            value: action.value,
+            snapshotID: action.target.snapshotID
         ))
         return try json(ActionResponse())
     }
@@ -211,7 +220,8 @@ public final class SessionAgentHTTPRouter: Sendable {
         let action = try decode(AgentProtocol.ElementActionRequest.self, from: request)
         _ = try await agent.perform(ComputerUseAgentCore.ElementActionRequest(
             elementID: action.target.elementID,
-            actionName: action.name
+            actionName: action.name,
+            snapshotID: action.target.snapshotID
         ))
         return try json(ActionResponse())
     }
@@ -313,6 +323,29 @@ public final class SessionAgentHTTPRouter: Sendable {
     private func unsupported(_ message: String) -> SessionAgentHTTPResponse {
         do {
             return try error(statusCode: 501, code: .unsupportedAction, message: message)
+        } catch {
+            return SessionAgentHTTPResponse(statusCode: 500)
+        }
+    }
+
+    private func snapshotCacheError(_ error: SnapshotCacheError) -> SessionAgentHTTPResponse {
+        do {
+            switch error {
+            case let .snapshotExpired(snapshotID):
+                return try self.error(
+                    statusCode: 410,
+                    code: .snapshotExpired,
+                    message: snapshotID.isEmpty
+                        ? "Snapshot id is required"
+                        : "Snapshot \(snapshotID) has expired"
+                )
+            case let .elementNotFound(snapshotID, elementID):
+                return try self.error(
+                    statusCode: 404,
+                    code: .elementNotFound,
+                    message: "Element \(elementID) was not found in snapshot \(snapshotID)"
+                )
+            }
         } catch {
             return SessionAgentHTTPResponse(statusCode: 500)
         }

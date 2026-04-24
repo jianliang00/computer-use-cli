@@ -74,28 +74,33 @@ public protocol StateCapturing: Sendable {
 
 public struct MacOSStateCapturer: StateCapturing {
     private let applicationLister: any RunningApplicationListing
+    private let elementCache: MacOSSnapshotElementCache?
     private let maxAccessibilityDepth: Int
     private let maxAccessibilityNodes: Int
 
     public init(
         applicationLister: any RunningApplicationListing = WorkspaceRunningApplicationLister(),
+        elementCache: MacOSSnapshotElementCache? = nil,
         maxAccessibilityDepth: Int = 8,
         maxAccessibilityNodes: Int = 400
     ) {
         self.applicationLister = applicationLister
+        self.elementCache = elementCache
         self.maxAccessibilityDepth = maxAccessibilityDepth
         self.maxAccessibilityNodes = maxAccessibilityNodes
     }
 
     public func captureState() async throws -> AgentStateSnapshot {
+        let snapshotID = UUID().uuidString
         let applications = try await applicationLister.runningApplications()
         let screenshot = try await captureScreenshot()
         let root = captureAccessibilityRoot(
+            snapshotID: snapshotID,
             applications: applications
         )
 
         return AgentStateSnapshot(
-            snapshotID: UUID().uuidString,
+            snapshotID: snapshotID,
             screenshot: screenshot,
             accessibilityRoot: root,
             applications: applications
@@ -134,6 +139,7 @@ public struct MacOSStateCapturer: StateCapturing {
     }
 
     private func captureAccessibilityRoot(
+        snapshotID: String,
         applications: [RunningApplication]
     ) -> AccessibilityNode {
         let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -150,6 +156,7 @@ public struct MacOSStateCapturer: StateCapturing {
 
         var nextID = 0
         var remainingNodes = maxAccessibilityNodes
+        var elements: [String: AXUIElement] = [:]
         let element = AXUIElementCreateApplication(pid)
 
         func buildNode(
@@ -159,6 +166,7 @@ public struct MacOSStateCapturer: StateCapturing {
             nextID += 1
             remainingNodes -= 1
             let id = "ax-\(nextID)"
+            elements[id] = element
 
             let childElements = depth < maxAccessibilityDepth && remainingNodes > 0
                 ? accessibilityChildren(of: element)
@@ -178,7 +186,9 @@ public struct MacOSStateCapturer: StateCapturing {
             )
         }
 
-        return buildNode(from: element, depth: 0)
+        let root = buildNode(from: element, depth: 0)
+        elementCache?.store(snapshotID: snapshotID, elements: elements)
+        return root
     }
 
     private func accessibilityChildren(of element: AXUIElement) -> [AXUIElement] {

@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 
@@ -15,7 +16,9 @@ public enum KeyModifier: String, Codable, CaseIterable, Sendable {
 }
 
 public struct ClickActionRequest: Codable, Equatable, Sendable {
-    public var location: Point
+    public var location: Point?
+    public var snapshotID: String?
+    public var elementID: String?
     public var button: MouseButton
     public var clickCount: Int
 
@@ -25,6 +28,21 @@ public struct ClickActionRequest: Codable, Equatable, Sendable {
         clickCount: Int = 1
     ) {
         self.location = location
+        self.snapshotID = nil
+        self.elementID = nil
+        self.button = button
+        self.clickCount = clickCount
+    }
+
+    public init(
+        snapshotID: String,
+        elementID: String,
+        button: MouseButton = .left,
+        clickCount: Int = 1
+    ) {
+        self.location = nil
+        self.snapshotID = snapshotID
+        self.elementID = elementID
         self.button = button
         self.clickCount = clickCount
     }
@@ -72,20 +90,32 @@ public struct ScrollActionRequest: Codable, Equatable, Sendable {
 }
 
 public struct SetValueActionRequest: Codable, Equatable, Sendable {
+    public var snapshotID: String?
     public var elementID: String
     public var value: String
 
-    public init(elementID: String, value: String) {
+    public init(
+        elementID: String,
+        value: String,
+        snapshotID: String? = nil
+    ) {
+        self.snapshotID = snapshotID
         self.elementID = elementID
         self.value = value
     }
 }
 
 public struct ElementActionRequest: Codable, Equatable, Sendable {
+    public var snapshotID: String?
     public var elementID: String
     public var actionName: String
 
-    public init(elementID: String, actionName: String) {
+    public init(
+        elementID: String,
+        actionName: String,
+        snapshotID: String? = nil
+    ) {
+        self.snapshotID = snapshotID
         self.elementID = elementID
         self.actionName = actionName
     }
@@ -112,10 +142,19 @@ public protocol ActionPerforming: Sendable {
 }
 
 public struct MacOSActionPerformer: ActionPerforming {
-    public init() {}
+    private let elementCache: MacOSSnapshotElementCache?
+
+    public init(elementCache: MacOSSnapshotElementCache? = nil) {
+        self.elementCache = elementCache
+    }
 
     public func click(_ request: ClickActionRequest) async throws -> ActionReceipt {
-        let location = CGPoint(x: request.location.x, y: request.location.y)
+        let request = try resolvedClickRequest(request)
+        guard let requestLocation = request.location else {
+            throw ComputerUseAgentCoreError.unsupportedAction("click")
+        }
+
+        let location = CGPoint(x: requestLocation.x, y: requestLocation.y)
         let button = cgMouseButton(request.button)
         let downType = mouseDownType(request.button)
         let upType = mouseUpType(request.button)
@@ -188,11 +227,36 @@ public struct MacOSActionPerformer: ActionPerforming {
     }
 
     public func setValue(_ request: SetValueActionRequest) async throws -> ActionReceipt {
-        throw ComputerUseAgentCoreError.unsupportedAction("set-value")
+        let element = try cachedElement(
+            snapshotID: request.snapshotID,
+            elementID: request.elementID
+        )
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXValueAttribute as CFString,
+            request.value as CFTypeRef
+        )
+        guard result == .success else {
+            throw ComputerUseAgentCoreError.unsupportedAction("set-value")
+        }
+
+        return ActionReceipt(accepted: true)
     }
 
     public func perform(_ request: ElementActionRequest) async throws -> ActionReceipt {
-        throw ComputerUseAgentCoreError.unsupportedAction(request.actionName)
+        let element = try cachedElement(
+            snapshotID: request.snapshotID,
+            elementID: request.elementID
+        )
+        let result = AXUIElementPerformAction(
+            element,
+            request.actionName as CFString
+        )
+        guard result == .success else {
+            throw ComputerUseAgentCoreError.unsupportedAction(request.actionName)
+        }
+
+        return ActionReceipt(accepted: true)
     }
 
     private func postMouse(
@@ -269,6 +333,74 @@ public struct MacOSActionPerformer: ActionPerforming {
         }
 
         return nil
+    }
+
+    private func cachedElement(
+        snapshotID: String?,
+        elementID: String
+    ) throws -> AXUIElement {
+        guard let snapshotID else {
+            throw SnapshotCacheError.snapshotExpired("")
+        }
+
+        guard let elementCache else {
+            throw SnapshotCacheError.snapshotExpired(snapshotID)
+        }
+
+        return try elementCache.element(snapshotID: snapshotID, elementID: elementID)
+    }
+
+    private func resolvedClickRequest(_ request: ClickActionRequest) throws -> ClickActionRequest {
+        if request.location != nil {
+            return request
+        }
+
+        guard let snapshotID = request.snapshotID,
+              let elementID = request.elementID else {
+            throw ComputerUseAgentCoreError.unsupportedAction("click")
+        }
+
+        let element = try cachedElement(snapshotID: snapshotID, elementID: elementID)
+        guard let frame = frame(of: element) else {
+            throw ComputerUseAgentCoreError.unsupportedAction("element click")
+        }
+
+        return ClickActionRequest(
+            location: Point(
+                x: frame.origin.x + frame.size.width / 2,
+                y: frame.origin.y + frame.size.height / 2
+            ),
+            button: request.button,
+            clickCount: request.clickCount
+        )
+    }
+
+    private func frame(of element: AXUIElement) -> Rect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let positionValue,
+              let sizeValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+            return nil
+        }
+
+        let positionAXValue = positionValue as! AXValue
+        let sizeAXValue = sizeValue as! AXValue
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionAXValue, .cgPoint, &origin),
+              AXValueGetValue(sizeAXValue, .cgSize, &size) else {
+            return nil
+        }
+
+        return Rect(
+            origin: Point(x: origin.x, y: origin.y),
+            size: Size(width: size.width, height: size.height)
+        )
     }
 
     private var specialKeyCodes: [String: CGKeyCode] {

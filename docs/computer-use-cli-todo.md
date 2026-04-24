@@ -34,13 +34,14 @@
 - `/permissions` 使用 macOS Accessibility 与 Screen Recording API 检测真实授权状态
 - `/apps` 使用 `NSWorkspace` 枚举运行中 GUI app，并标记 frontmost app
 - `POST /state` 已可通过 ScreenCaptureKit 返回 PNG screenshot，并通过 AX API 返回基础 AX tree
-- 坐标 `click`、`type`、`key`、`drag`、`scroll` 已接入 CoreGraphics 事件执行器
+- snapshot cache 已实现最近 8 个 snapshot、60 秒 TTL 和 element_id 绑定
+- `click`、`type`、`key`、`drag`、`scroll` 已接入 CoreGraphics 事件执行器
+- `set-value` 与 `action` 已通过 snapshot cache 接入 AX 元素执行
 
 尚未完成：
 
 - `/Applications/ComputerUseAgent.app` bundle 包装、Info.plist 与固定 bundle id 安装
-- snapshot cache 与 element_id 反查
-- 元素 click、`set-value`、`action` 的 AX 元素执行
+- TextEdit/Finder/Safari 真实端到端动作验证
 - bootstrap agent 的状态刷新与持久化实现
 - macOS image 安装层、authorized image 流程和端到端验证
 
@@ -305,7 +306,7 @@
   - `computer-use state get --machine <name>` 可返回完整结果
   - screenshot 与 AX tree 对应同一时刻
 
-- [ ] T14 实现 snapshot cache
+- [x] T14 实现 snapshot cache
   目标：
   保证元素操作基于稳定快照执行。
 
