@@ -37,12 +37,15 @@
 - snapshot cache 已实现最近 8 个 snapshot、60 秒 TTL 和 element_id 绑定
 - `click`、`type`、`key`、`drag`、`scroll` 已接入 CoreGraphics 事件执行器
 - `set-value` 与 `action` 已通过 snapshot cache 接入 AX 元素执行
+- `bootstrap-agent` 可刷新并持久化 bootstrap status JSON
+- 已提供 bootstrap LaunchDaemon 与 session LaunchAgent plist 模板
+- 已提供 `ComputerUseAgent.app` 打包脚本，并验证 bundle id 为 `io.github.jianliang00.computer-use.agent`
 
 尚未完成：
 
-- `/Applications/ComputerUseAgent.app` bundle 包装、Info.plist 与固定 bundle id 安装
+- guest image 内安装 `/Applications/ComputerUseAgent.app`
 - TextEdit/Finder/Safari 真实端到端动作验证
-- bootstrap agent 的状态刷新与持久化实现
+- bootstrap agent 在 guest 启动流程中的端到端验证
 - macOS image 安装层、authorized image 流程和端到端验证
 
 ## 任务清单

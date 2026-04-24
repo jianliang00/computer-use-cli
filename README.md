@@ -36,6 +36,10 @@ forwarding computer-use commands to a session agent running inside the guest.
   - `computer-use action set-value --machine <name> --snapshot-id <id> --element-id <id> --value <value>`
   - `computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>`
 - `computer-use-agent` starts a guest-side HTTP server on port `7777`.
+- `scripts/package-computer-use-agent-app.sh` builds `ComputerUseAgent.app`
+  with bundle id `io.github.jianliang00.computer-use.agent`.
+- `bootstrap-agent` refreshes and persists bootstrap status JSON.
+- LaunchDaemon/LaunchAgent plist templates live under `images/macos/launchd/`.
 - The session agent implements:
   - `GET /health`
   - `GET /permissions` using macOS Accessibility and Screen Recording checks
@@ -49,7 +53,7 @@ forwarding computer-use commands to a session agent running inside the guest.
 ## Remaining Work
 
 - Package `computer-use-agent` as `/Applications/ComputerUseAgent.app` with the
-  fixed bundle identifier.
+  fixed bundle identifier inside the guest image.
 - Run end-to-end action validation against TextEdit, Finder, and Safari.
 - Implement bootstrap status refresh/persistence.
 - Add macOS image build/install assets, authorized image flow, and end-to-end

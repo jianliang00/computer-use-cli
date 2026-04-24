@@ -16,6 +16,7 @@ let package = Package(
         .library(name: "ComputerUseAgentApp", targets: ["ComputerUseAgentApp"]),
         .library(name: "ComputerUseAgentCore", targets: ["ComputerUseAgentCore"]),
         .executable(name: "computer-use-agent", targets: ["computer-use-agent"]),
+        .executable(name: "bootstrap-agent", targets: ["bootstrap-agent"]),
     ],
     targets: [
         .target(
@@ -60,6 +61,13 @@ let package = Package(
                 "ComputerUseAgentCore",
             ],
             path: "Sources/computer-use-agent"
+        ),
+        .executableTarget(
+            name: "bootstrap-agent",
+            dependencies: [
+                "BootstrapAgent",
+            ],
+            path: "Sources/bootstrap-agent"
         ),
         .testTarget(
             name: "ComputerUseCLITests",

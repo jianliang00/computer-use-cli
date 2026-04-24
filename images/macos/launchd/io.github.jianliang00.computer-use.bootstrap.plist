@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.github.jianliang00.computer-use.bootstrap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/libexec/computer-use/bootstrap-agent</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>5</integer>
+  <key>StandardOutPath</key>
+  <string>/var/log/computer-use-bootstrap.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/computer-use-bootstrap.log</string>
+</dict>
+</plist>
