@@ -121,6 +121,42 @@ func containerCLIBridgeBuildsExpectedLifecycleCommands() throws {
     #expect(runner.isExhausted)
 }
 
+@Test
+func containerCLIBridgeAppendsInitArgumentsAfterImage() throws {
+    let runner = QueueContainerCommandRunner(steps: [
+        .success(
+            arguments: [
+                "create",
+                "--name", "demo",
+                "--gui",
+                "--publish", "127.0.0.1:46000:7777/tcp",
+                "ghcr.io/jianliang00/macos-base:26.3",
+                "tail", "-f", "/dev/null",
+            ],
+            result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
+        ),
+        .success(
+            arguments: ["inspect", "demo"],
+            result: CommandExecutionResult(
+                exitCode: 0,
+                stdout: #"[{"status":"stopped","configuration":{"id":"demo","image":{"reference":"ghcr.io/jianliang00/macos-base:26.3"},"publishedPorts":[{"containerPort":7777,"hostPort":46000,"hostAddress":"127.0.0.1","proto":"tcp","count":1}]}}]"#,
+                stderr: ""
+            )
+        ),
+    ])
+    let bridge = ContainerCLIBridge(runner: runner)
+
+    let created = try bridge.createSandbox(configuration: SandboxConfiguration(
+        name: "demo",
+        imageReference: "ghcr.io/jianliang00/macos-base:26.3",
+        publishedHostPort: 46000,
+        initProcessArguments: ["tail", "-f", "/dev/null"]
+    ))
+
+    #expect(created.imageReference == "ghcr.io/jianliang00/macos-base:26.3")
+    #expect(runner.isExhausted)
+}
+
 private final class QueueContainerCommandRunner: ContainerCommandRunning, @unchecked Sendable {
     struct Step {
         let arguments: [String]

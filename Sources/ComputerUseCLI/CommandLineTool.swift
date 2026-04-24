@@ -56,7 +56,10 @@ public struct CommandLineTool {
             return try JSONOutput.render(metadata)
         case "start":
             let name = try flags.requiredValue(for: "--machine")
-            let metadata = try machineService.start(name: name)
+            let metadata = try machineService.start(
+                name: name,
+                initProcessArguments: flags.passthroughArguments
+            )
             return try JSONOutput.render(metadata)
         case "inspect":
             let name = try flags.requiredValue(for: "--machine")
@@ -85,7 +88,7 @@ public struct CommandLineTool {
         """
         Usage:
           computer-use machine create --name <name> --image <image> [--host-port <port>]
-          computer-use machine start --machine <name>
+          computer-use machine start --machine <name> [-- <command> [args...]]
           computer-use machine inspect --machine <name>
           computer-use machine stop --machine <name>
           computer-use machine list
@@ -104,10 +107,16 @@ struct FlagParser {
 
     func parse() throws -> ParsedFlags {
         var values: [String: String] = [:]
+        var passthroughArguments: [String] = []
         var index = 0
 
         while index < arguments.count {
             let argument = arguments[index]
+            if argument == "--" {
+                passthroughArguments = Array(arguments.dropFirst(index + 1))
+                break
+            }
+
             guard argument.hasPrefix("--") else {
                 throw CLIError.unexpectedArgument(argument)
             }
@@ -121,15 +130,20 @@ struct FlagParser {
             index += 2
         }
 
-        return ParsedFlags(values: values)
+        return ParsedFlags(values: values, passthroughArguments: passthroughArguments)
     }
 }
 
 struct ParsedFlags {
     private let values: [String: String]
+    let passthroughArguments: [String]
 
-    init(values: [String: String]) {
+    init(
+        values: [String: String],
+        passthroughArguments: [String]
+    ) {
         self.values = values
+        self.passthroughArguments = passthroughArguments
     }
 
     func requiredValue(for key: String) throws -> String {

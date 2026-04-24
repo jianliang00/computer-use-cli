@@ -39,22 +39,30 @@ public struct MachineService {
 
     public func inspect(name: String) throws -> MachineMetadata {
         let metadata = try store.metadata(named: name)
+        let lookupID = metadata.sandboxID ?? metadata.name
 
-        guard let sandboxID = metadata.sandboxID else {
-            return metadata
+        do {
+            let details = try containerBridge.inspectSandbox(id: lookupID)
+            let updated = metadata.updating(from: details, updatedAt: now())
+            try store.update(updated)
+            return updated
+        } catch let error as ContainerBridgeError {
+            if error == .sandboxNotFound(lookupID), metadata.sandboxID == nil {
+                return metadata
+            }
+
+            throw error
         }
-
-        let details = try containerBridge.inspectSandbox(id: sandboxID)
-        let updated = metadata.updating(from: details, updatedAt: now())
-        try store.update(updated)
-        return updated
     }
 
     public func list() -> [MachineMetadata] {
         (try? store.allMetadata()) ?? []
     }
 
-    public func start(name: String) throws -> MachineMetadata {
+    public func start(
+        name: String,
+        initProcessArguments: [String] = []
+    ) throws -> MachineMetadata {
         let metadata = try store.metadata(named: name)
 
         let details: SandboxDetails
@@ -68,16 +76,29 @@ public struct MachineService {
 
             details = try containerBridge.startSandbox(id: sandboxID)
         } else {
-            let created = try containerBridge.createSandbox(
-                configuration: SandboxConfiguration(
-                    name: metadata.name,
-                    imageReference: metadata.imageReference,
-                    publishedHostPort: metadata.hostPort
-                )
-            )
+            let created: SandboxDetails
+            do {
+                created = try containerBridge.inspectSandbox(id: metadata.name)
+            } catch let error as ContainerBridgeError {
+                if error == .sandboxNotFound(metadata.name) {
+                    created = try containerBridge.createSandbox(
+                        configuration: SandboxConfiguration(
+                            name: metadata.name,
+                            imageReference: metadata.imageReference,
+                            publishedHostPort: metadata.hostPort,
+                            initProcessArguments: initProcessArguments
+                        )
+                    )
+                } else {
+                    throw error
+                }
+            }
+
+            let createdMetadata = metadata.updating(from: created, updatedAt: now())
+            try store.update(createdMetadata)
 
             if created.status == .running {
-                details = created
+                return createdMetadata
             } else {
                 details = try containerBridge.startSandbox(id: created.sandboxID)
             }

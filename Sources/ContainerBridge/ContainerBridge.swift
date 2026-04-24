@@ -7,6 +7,7 @@ public struct SandboxConfiguration: Equatable, Sendable {
     public let guestAgentPort: Int
     public let hostAddress: String
     public let guiEnabled: Bool
+    public let initProcessArguments: [String]
 
     public init(
         name: String,
@@ -14,7 +15,8 @@ public struct SandboxConfiguration: Equatable, Sendable {
         publishedHostPort: Int,
         guestAgentPort: Int = 7777,
         hostAddress: String = "127.0.0.1",
-        guiEnabled: Bool = true
+        guiEnabled: Bool = true,
+        initProcessArguments: [String] = []
     ) {
         self.name = name
         self.imageReference = imageReference
@@ -22,6 +24,7 @@ public struct SandboxConfiguration: Equatable, Sendable {
         self.guestAgentPort = guestAgentPort
         self.hostAddress = hostAddress
         self.guiEnabled = guiEnabled
+        self.initProcessArguments = initProcessArguments
     }
 
     var publishSpec: String {
@@ -112,6 +115,7 @@ public struct ContainerCLIBridge: ContainerRuntimeBridging {
             "--publish", configuration.publishSpec,
             configuration.imageReference,
         ])
+        arguments.append(contentsOf: configuration.initProcessArguments)
 
         let result = try runner.run(arguments: arguments)
         let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
