@@ -23,7 +23,7 @@ public final class SessionAgentHTTPServer: @unchecked Sendable {
         let listener = try NWListener(using: .tcp, on: port)
         listener.newConnectionHandler = { [router] (connection: NWConnection) in
             connection.start(queue: queue)
-            Self.receive(on: connection, router: router)
+            Self.receive(on: connection, router: router, buffer: Data())
         }
         listener.start(queue: queue)
         self.listener = listener
@@ -36,7 +36,8 @@ public final class SessionAgentHTTPServer: @unchecked Sendable {
 
     private static func receive(
         on connection: NWConnection,
-        router: SessionAgentHTTPRouter
+        router: SessionAgentHTTPRouter,
+        buffer: Data
     ) {
         connection.receive(
             minimumIncompleteLength: 1,
@@ -52,10 +53,17 @@ public final class SessionAgentHTTPServer: @unchecked Sendable {
                 return
             }
 
+            var buffer = buffer
+            buffer.append(data)
+            guard HTTPWireCodec.isCompleteRequest(buffer) else {
+                receive(on: connection, router: router, buffer: buffer)
+                return
+            }
+
             Task {
                 let response: SessionAgentHTTPResponse
                 do {
-                    let request = try HTTPWireCodec.parseRequest(data)
+                    let request = try HTTPWireCodec.parseRequest(buffer)
                     response = await router.handle(request)
                 } catch {
                     response = SessionAgentHTTPResponse(
@@ -88,14 +96,40 @@ public enum SessionAgentHTTPServerError: Error, LocalizedError, Equatable {
 }
 
 enum HTTPWireCodec {
+    private static let headerSeparator = Data("\r\n\r\n".utf8)
+
+    static func isCompleteRequest(_ data: Data) -> Bool {
+        guard let separatorRange = data.range(of: headerSeparator) else {
+            return false
+        }
+
+        let headerData = data[..<separatorRange.lowerBound]
+        let headers = String(decoding: headerData, as: UTF8.self)
+        let contentLength = headers
+            .split(separator: "\r\n")
+            .dropFirst()
+            .compactMap { line -> Int? in
+                let parts = line.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2,
+                      parts[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "content-length" else {
+                    return nil
+                }
+
+                return Int(parts[1].trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            .first ?? 0
+
+        let bodyStart = separatorRange.upperBound
+        return data[bodyStart...].count >= contentLength
+    }
+
     static func parseRequest(_ data: Data) throws -> SessionAgentHTTPRequest {
-        let raw = String(decoding: data, as: UTF8.self)
-        guard let separator = raw.range(of: "\r\n\r\n") else {
+        guard let separator = data.range(of: headerSeparator) else {
             throw SessionAgentHTTPServerError.invalidPort(-1)
         }
 
-        let headerBlock = raw[..<separator.lowerBound]
-        let body = raw[separator.upperBound...]
+        let headerBlock = String(decoding: data[..<separator.lowerBound], as: UTF8.self)
+        let body = data[separator.upperBound...]
         let lines = headerBlock.split(separator: "\r\n", omittingEmptySubsequences: false)
         guard let requestLine = lines.first else {
             throw SessionAgentHTTPServerError.invalidPort(-1)
@@ -110,7 +144,7 @@ enum HTTPWireCodec {
         return SessionAgentHTTPRequest(
             method: method,
             path: String(parts[1]),
-            body: Data(body.utf8)
+            body: Data(body)
         )
     }
 

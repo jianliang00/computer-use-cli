@@ -38,6 +38,9 @@ forwarding computer-use commands to a session agent running inside the guest.
 - `computer-use-agent` starts a guest-side HTTP server on port `7777`.
 - `scripts/package-computer-use-agent-app.sh` builds `ComputerUseAgent.app`
   with bundle id `io.github.jianliang00.computer-use.agent`.
+- `scripts/smoke-local-agent-e2e.sh` runs a local end-to-end smoke against the
+  session agent. It verifies TextEdit input/state/action flows and Finder
+  click/scroll/drag flows.
 - `bootstrap-agent` refreshes and persists bootstrap status JSON.
 - LaunchDaemon/LaunchAgent plist templates live under `images/macos/launchd/`.
 - The session agent implements:
@@ -54,7 +57,6 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 - Package `computer-use-agent` as `/Applications/ComputerUseAgent.app` with the
   fixed bundle identifier inside the guest image.
-- Run end-to-end action validation against TextEdit, Finder, and Safari.
-- Implement bootstrap status refresh/persistence.
+- Validate bootstrap status refresh/persistence inside a real guest boot flow.
 - Add macOS image build/install assets, authorized image flow, and end-to-end
   validation.

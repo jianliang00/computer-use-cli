@@ -40,11 +40,13 @@
 - `bootstrap-agent` 可刷新并持久化 bootstrap status JSON
 - 已提供 bootstrap LaunchDaemon 与 session LaunchAgent plist 模板
 - 已提供 `ComputerUseAgent.app` 打包脚本，并验证 bundle id 为 `io.github.jianliang00.computer-use.agent`
+- `scripts/smoke-local-agent-e2e.sh` 已通过本机端到端 smoke：
+  - TextEdit：element click、type、Return、set-value、AXRaise action、AX tree 读回 marker
+  - Finder：坐标 click、scroll、drag
 
 尚未完成：
 
 - guest image 内安装 `/Applications/ComputerUseAgent.app`
-- TextEdit/Finder/Safari 真实端到端动作验证
 - bootstrap agent 在 guest 启动流程中的端到端验证
 - macOS image 安装层、authorized image 流程和端到端验证
 
@@ -288,7 +290,7 @@
   完成标准：
   - 出问题时可以仅通过 `agent doctor` 判断故障位于 host、container、bootstrap、session agent 还是权限
 
-- [ ] T13 实现 `/state`
+- [x] T13 实现 `/state`
   目标：
   建立完整的观测闭环。
 
@@ -328,7 +330,7 @@
   - 过期 snapshot 返回 `snapshot_expired`
   - 使用错误 `snapshot_id` 时不会误操作其他元素
 
-- [ ] T15 实现基础输入动作
+- [x] T15 实现基础输入动作
   目标：
   实现最常用的动作集。
 
@@ -343,7 +345,7 @@
   - 坐标点击和元素点击都可用
   - Return、Tab、方向键等基础键可用
 
-- [ ] T16 实现剩余动作
+- [x] T16 实现剩余动作
   目标：
   补齐全部动作能力。
 
