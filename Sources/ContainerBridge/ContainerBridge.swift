@@ -295,15 +295,19 @@ public struct ProcessContainerCommandRunner: ContainerCommandRunning {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        let stdoutCollector = ProcessPipeCollector()
+        let stderrCollector = ProcessPipeCollector()
+        let outputGroup = DispatchGroup()
+
         try process.run()
+        collectOutput(from: stdoutPipe, into: stdoutCollector, group: outputGroup)
+        collectOutput(from: stderrPipe, into: stderrCollector, group: outputGroup)
         process.waitUntilExit()
+        outputGroup.wait()
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-        let stdout = String(decoding: stdoutData, as: UTF8.self)
+        let stdout = String(decoding: stdoutCollector.data(), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let stderr = String(decoding: stderrData, as: UTF8.self)
+        let stderr = String(decoding: stderrCollector.data(), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard process.terminationStatus == 0 else {
@@ -319,6 +323,43 @@ public struct ProcessContainerCommandRunner: ContainerCommandRunning {
             stdout: stdout,
             stderr: stderr
         )
+    }
+
+    private func collectOutput(
+        from pipe: Pipe,
+        into collector: ProcessPipeCollector,
+        group: DispatchGroup
+    ) {
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
+            let handle = pipe.fileHandleForReading
+            while true {
+                let data = handle.availableData
+                if data.isEmpty {
+                    break
+                }
+                collector.append(data)
+            }
+            group.leave()
+        }
+    }
+}
+
+private final class ProcessPipeCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    func append(_ data: Data) {
+        lock.lock()
+        storage.append(data)
+        lock.unlock()
+    }
+
+    func data() -> Data {
+        lock.lock()
+        let data = storage
+        lock.unlock()
+        return data
     }
 }
 

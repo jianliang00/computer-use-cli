@@ -250,7 +250,7 @@
     - `agent_running`
     - `agent_port`
 
-- [ ] T10 完成镜像安装层
+- [x] T10 完成镜像安装层
   目标：
   让 product image 启动后具备完整运行条件。
 
@@ -281,9 +281,10 @@
   - product guest 内 bootstrap LaunchDaemon 已加载，安装文件存在
   - 当前 runtime 对 darwin 镜像不支持 `--publish`；host-side 访问路径已改为 `container_exec`
   - 已通过真实 CLI 验证 product machine 可启动，metadata 会记录 `agentTransport: "container_exec"`
-  - auto-login 仍需在 authorized image 准备时 seed `/etc/kcpassword`；未 seed 时不会出现 `gui/501`，session agent 不会自动启动
+  - Dockerfile 现在通过 `configure-autologin.sh admin admin` seed `/etc/kcpassword`
+  - 已验证 product guest 启动后 `admin` 自动登录，`gui/501` 存在，session LaunchAgent 自动启动
 
-- [ ] T11 产出 authorized image
+- [x] T11 产出 authorized image
   目标：
   把权限状态固化为最终运行镜像。
 
@@ -298,13 +299,22 @@
      - Accessibility
      - Screen Recording
   3. 验证 agent 可用
-  4. 执行 `container commit`
+  4. 执行 `container macos package` 并 `container image load`
 
   完成标准：
   - `authorized image` 可重复用于创建新 guest
   - 新建 guest 后不需要再次人工授权
 
-- [ ] T12 实现 `agent ping` 与 `agent doctor`
+  当前状态：
+  - 已产出并加载 `local/computer-use:authorized`
+  - 平台 manifest digest:
+    `sha256:fce8effdfa3803e7317f02d954100020e1f353c054b40d63b0b8a0ffdbaff469`
+  - 从 authorized image 新建 `cu-authorized-verify` guest 后验证通过：
+    `autoLoginUser=admin`、`/dev/console=admin 501`、LaunchAgent 运行、
+    `/health` 正常、`/permissions` 为 Accessibility 和 Screen Recording
+    双 true、`/state` 返回 Finder PNG screenshot 和 270 个 AX nodes
+
+- [x] T12 实现 `agent ping` 与 `agent doctor`
   目标：
   建立稳定的诊断链路。
 
@@ -322,6 +332,14 @@
 
   完成标准：
   - 出问题时可以仅通过 `agent doctor` 判断故障位于 host、container、bootstrap、session agent 还是权限
+
+  当前状态：
+  - 已通过 `authorized-smoke` 真实 CLI 验证 `agent ping`
+  - `agent doctor` 能报告 sandbox 运行状态、`container_exec` transport、
+    session agent readiness、Accessibility 和 Screen Recording 状态
+  - darwin 镜像无 published port 时会使用 `container_exec` transport
+  - 已修复大 `/state` 响应下 `container exec` stdout 读取不及时导致的
+    runtime attachment buffer 问题
 
 - [x] T13 实现 `/state`
   目标：

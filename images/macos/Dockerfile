@@ -8,7 +8,7 @@ COPY scripts/install-computer-use.sh /tmp/computer-use-install/install-computer-
 COPY scripts/configure-autologin.sh /tmp/computer-use-install/configure-autologin.sh
 
 RUN BOOTSTRAP_LAUNCHD=0 /bin/bash /tmp/computer-use-install/install-computer-use.sh /tmp/computer-use-install
-RUN /bin/bash /tmp/computer-use-install/configure-autologin.sh admin
+RUN /bin/bash /tmp/computer-use-install/configure-autologin.sh admin admin
 RUN /bin/rm -rf /tmp/computer-use-install
 
 CMD ["/usr/bin/tail", "-f", "/dev/null"]

@@ -54,9 +54,22 @@ forwarding computer-use commands to a session agent running inside the guest.
 - The validated macOS base has been packaged and loaded as
   `local/macos-base:latest`.
 - `local/computer-use:product` builds successfully from that base and can be
-  started by the macOS container runtime.
+  started by the macOS container runtime. The product image seeds
+  `autoLoginUser=admin` and `/etc/kcpassword` for the local `admin/admin`
+  validation account.
+- `local/computer-use:authorized` has been packaged from an authorized product
+  guest and loaded locally. A fresh guest created from that image auto-logs in
+  as `admin`, starts `ComputerUseAgent.app`, returns
+  `{"accessibility":true,"screen_recording":true}`, and serves `/state` with a
+  PNG screenshot plus Finder AX tree.
 - macOS images that cannot use `--publish` are handled by falling back to
   `container exec` transport for agent HTTP requests.
+- The `container_exec` transport drains subprocess stdout/stderr while commands
+  are running, so large `/state` responses with screenshots can be returned
+  without hitting the macOS runtime attachment buffer limit.
+- A real CLI smoke against `local/computer-use:authorized` validates
+  machine create/start, `agent ping`, `agent doctor`, permissions, apps,
+  Finder state capture, and Finder scroll/click actions.
 - The session agent implements:
   - `GET /health`
   - `GET /permissions` using macOS Accessibility and Screen Recording checks
@@ -69,7 +82,6 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 ## Remaining Work
 
-- Seed auto-login and complete the authorized image flow for Accessibility and
-  Screen Recording.
-- Validate the full authorized-image lifecycle after the GUI session and
-  permissions are persisted.
+- Finish the repeatable app-level workflow smoke for TextEdit input and a
+  Finder or Safari foreground interaction. During validation, TextEdit launched
+  as a process but did not appear in the agent `NSWorkspace` application list.

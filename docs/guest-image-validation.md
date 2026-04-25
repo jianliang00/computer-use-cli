@@ -98,8 +98,66 @@ Latest run: 2026-04-25.
   `agentTransport: "container_exec"`.
 - `computer-use agent ping` now attempts
   `container exec <sandbox> /usr/bin/curl http://127.0.0.1:7777/health`.
-  It still fails with connection refused until the authorized image flow creates
-  a logged-in `admin` GUI session and starts the session LaunchAgent.
+  Against the pre-authorization product image this failed with connection
+  refused because no logged-in `admin` GUI session existed yet.
+- Auto-login is now seeded in the product image by running
+  `configure-autologin.sh admin admin` during the image build. In a fresh product
+  guest, `/etc/kcpassword` was present as `root:wheel` with mode `600` and size
+  `12`, `autoLoginUser` was `admin`, `/dev/console` was owned by `admin` uid
+  `501`, and `GET /health` returned `{"ok":true,"version":"0.1.0"}`.
+- The product guest was authorized in the GUI by adding
+  `/Applications/ComputerUseAgent.app` under System Settings privacy controls
+  and enabling Screen & System Audio Recording. After restarting the LaunchAgent,
+  `GET /permissions` returned
+  `{"accessibility":true,"screen_recording":true}` and `POST /state` returned a
+  PNG screenshot plus AX nodes.
+- The authorized guest directory was packaged and loaded with:
+
+  ```sh
+  container macos package \
+    --input "$HOME/Library/Application Support/com.jianliang.OpenBox/container/containers/cu-product-authorize" \
+    --output /tmp/computer-use-authorized.oci.tar \
+    --reference local/computer-use:authorized
+  container image load --input /tmp/computer-use-authorized.oci.tar
+  ```
+
+- The loaded authorized image was inspected as `local/computer-use:authorized`
+  for `darwin/arm64`, size `31583519795`, platform manifest digest
+  `sha256:fce8effdfa3803e7317f02d954100020e1f353c054b40d63b0b8a0ffdbaff469`.
+- A fresh `cu-authorized-verify` guest created from
+  `local/computer-use:authorized` validated the persisted state:
+  - `/etc/kcpassword`: `root 0 wheel 0 600 12`
+  - `autoLoginUser`: `admin`
+  - `/dev/console`: `admin 501`
+  - LaunchAgent: `io.github.jianliang00.computer-use.agent` running as `admin`
+  - `GET /health`: `{"ok":true,"version":"0.1.0"}`
+  - `GET /permissions`: `{"accessibility":true,"screen_recording":true}`
+  - `GET /apps`: 21 GUI applications listed
+  - `POST /state` for Finder: `image/png` screenshot with base64 length
+    `4808020` and 270 AX nodes
+- A real CLI smoke against the authorized image was run with machine name
+  `authorized-smoke`:
+  - `machine create` recorded `local/computer-use:authorized`.
+  - `machine start` succeeded and fell back to
+    `agentTransport: "container_exec"` for darwin.
+  - `agent ping` returned `{"ok":true,"version":"0.1.0"}`.
+  - `agent doctor` reported `sandbox_running: true`,
+    `session_agent_ready: true`, `agent_transport: "container_exec"`, and both
+    permissions true.
+  - `permissions get` returned both permissions true.
+  - `apps list` returned 22 GUI applications.
+  - `state get --bundle-id com.apple.finder` returned a Finder snapshot with
+    PNG screenshot base64 length about `4003636` and 270 AX nodes.
+  - `action scroll` and coordinate `action click` returned `{"ok":true}`.
+- The first CLI `state get` attempt exposed a transport issue: large screenshot
+  responses could exceed the macOS runtime attachment buffer when Swift waited
+  for `container exec` to exit before reading stdout. `ProcessContainerCommandRunner`
+  now drains stdout/stderr concurrently while the subprocess runs, and the
+  Finder `state get` command passes through the CLI.
+- TextEdit remains a full workflow gap: `/System/Applications/TextEdit.app`
+  launched as the `admin` process, but it did not appear in the agent
+  `NSWorkspace` running application list, so `state get --bundle-id
+  com.apple.TextEdit` returned `app_not_found`.
 
 ## Notes
 
@@ -107,5 +165,13 @@ Latest run: 2026-04-25.
 - Live installs now bootstrap both the system LaunchDaemon and the current `admin` GUI LaunchAgent when an `admin` console session is active.
 - Product image build and host-side product machine start are now validated.
   Agent access uses `container_exec` for darwin images without published ports.
-- Authorized image validation still requires seeding `/etc/kcpassword` and
-  granting Accessibility plus Screen Recording permissions.
+- Authorized image validation is complete for auto-login, persisted Accessibility
+  and Screen Recording permissions, agent health, apps, and state capture.
+- Host CLI validation is complete through Finder state and basic actions over
+  the darwin `container_exec` transport; TextEdit foreground/app discovery still
+  needs follow-up before marking the full app workflow smoke complete.
+- If `container image load` appears idle after packaging, verify
+  `container system status` is using the OpenBox app root
+  `~/Library/Application Support/com.jianliang.OpenBox/container/`. Restarting
+  with explicit `--app-root` and `--install-root` restored image loading during
+  this run.

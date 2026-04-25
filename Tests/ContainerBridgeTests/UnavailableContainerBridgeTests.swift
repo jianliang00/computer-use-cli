@@ -194,6 +194,15 @@ func containerCLIBridgeFallsBackWhenDarwinPublishIsUnsupported() throws {
     #expect(runner.isExhausted)
 }
 
+@Test
+func processContainerCommandRunnerDrainsLargeStdoutWhileProcessRuns() throws {
+    let runner = ProcessContainerCommandRunner(executableURL: URL(fileURLWithPath: "/usr/bin/perl"))
+    let result = try runner.run(arguments: ["-e", #"print "x" x 2097152"#])
+
+    #expect(result.stdout.count == 2_097_152)
+    #expect(result.stderr.isEmpty)
+}
+
 private final class QueueContainerCommandRunner: ContainerCommandRunning, @unchecked Sendable {
     struct Step {
         let arguments: [String]
