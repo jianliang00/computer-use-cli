@@ -38,11 +38,19 @@ forwarding computer-use commands to a session agent running inside the guest.
 - `computer-use-agent` starts a guest-side HTTP server on port `7777`.
 - `scripts/package-computer-use-agent-app.sh` builds `ComputerUseAgent.app`
   with bundle id `io.github.jianliang00.computer-use.agent`.
+- `scripts/prepare-computer-use-image-context.sh` prepares a macOS image build
+  context with the app bundle, bootstrap agent, launchd plists, installer
+  scripts, and Dockerfile.
 - `scripts/smoke-local-agent-e2e.sh` runs a local end-to-end smoke against the
   session agent. It verifies TextEdit input/state/action flows and Finder
   click/scroll/drag flows.
 - `bootstrap-agent` refreshes and persists bootstrap status JSON.
 - LaunchDaemon/LaunchAgent plist templates live under `images/macos/launchd/`.
+- Guest live install validation is documented in
+  `docs/guest-image-validation.md`; it verifies launchd ownership, LaunchDaemon
+  and LaunchAgent registration, `GET /health`, `GET /permissions`, `GET /apps`,
+  expected `/state` permission denial, and `bootstrap-status.json`
+  `bootstrapped: true` inside a cloned macOS guest.
 - The session agent implements:
   - `GET /health`
   - `GET /permissions` using macOS Accessibility and Screen Recording checks
@@ -55,8 +63,9 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 ## Remaining Work
 
-- Package `computer-use-agent` as `/Applications/ComputerUseAgent.app` with the
-  fixed bundle identifier inside the guest image.
-- Validate bootstrap status refresh/persistence inside a real guest boot flow.
-- Add macOS image build/install assets, authorized image flow, and end-to-end
-  validation.
+- Build the product image once a local darwin/arm64 macOS base image tag is
+  available to `container build`.
+- Seed auto-login and complete the authorized image flow for Accessibility and
+  Screen Recording.
+- Validate the full host-side macOS machine lifecycle against the product or
+  authorized image.

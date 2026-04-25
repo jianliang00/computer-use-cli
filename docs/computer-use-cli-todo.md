@@ -43,12 +43,22 @@
 - `scripts/smoke-local-agent-e2e.sh` 已通过本机端到端 smoke：
   - TextEdit：element click、type、Return、set-value、AXRaise action、AX tree 读回 marker
   - Finder：坐标 click、scroll、drag
+- 已提供 `scripts/prepare-computer-use-image-context.sh`，可生成 macOS image build context
+- 已在克隆 macOS guest 中完成 live install 验证：
+  - `ComputerUseAgent.app`、`bootstrap-agent` 与 launchd plists 已安装为 `root:wheel`
+  - LaunchDaemon `io.github.jianliang00.computer-use.bootstrap` 已加载，`last exit code = 0`
+  - LaunchAgent `io.github.jianliang00.computer-use.agent` 已进入 `gui/501`，`state = running`
+  - `GET /health` 返回 `200`
+  - `GET /permissions` 返回未授权状态
+  - `GET /apps` 能列出 Terminal、Finder、Dock 等运行中 app
+  - `/state` 在未授权时返回 `403 permission_denied`
+  - `/var/run/computer-use/bootstrap-status.json` 已刷新为 `bootstrapped: true`
 
 尚未完成：
 
-- guest image 内安装 `/Applications/ComputerUseAgent.app`
-- bootstrap agent 在 guest 启动流程中的端到端验证
-- macOS image 安装层、authorized image 流程和端到端验证
+- 本地 `container build` 的 darwin/arm64 base image tag 尚不可用，product image build 未验证
+- auto-login 仍需在授权镜像准备阶段 seed `/etc/kcpassword`
+- authorized image 流程和完整 host-side macOS machine 生命周期验证
 
 ## 任务清单
 
@@ -152,7 +162,7 @@
   - 所有模型可稳定 encode/decode
   - CLI 与 agent 共用同一份协议定义
 
-- [ ] T06 实现 `ComputerUseAgent.app` 外壳
+- [x] T06 实现 `ComputerUseAgent.app` 外壳
   目标：
   让 session agent 以固定身份的 app bundle 运行。
 
@@ -203,7 +213,7 @@
   - `computer-use apps list --machine <name>` 可返回稳定结果
   - frontmost app 能正确标记
 
-- [ ] T09 实现 bootstrap agent
+- [x] T09 实现 bootstrap agent
   目标：
   为 guest 启动后的状态诊断提供稳定数据源。
 
@@ -249,6 +259,12 @@
   - 产物镜像可启动
   - 启动后 `admin` 能自动登录
   - `ComputerUseAgent.app` 会自动启动
+
+  当前状态：
+  - 已有 Dockerfile、installer、LaunchDaemon、LaunchAgent 和 image context 准备脚本
+  - 已在克隆 guest 中验证 live install、LaunchDaemon、LaunchAgent、HTTP health 和 bootstrap status
+  - 尚未通过 `container build` 生成 product image；当前本机缺少 darwin/arm64 macOS base image tag
+  - auto-login 仍需在 authorized image 准备时 seed `/etc/kcpassword`
 
 - [ ] T11 产出 authorized image
   目标：
