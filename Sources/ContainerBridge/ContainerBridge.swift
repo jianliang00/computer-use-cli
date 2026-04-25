@@ -33,6 +33,11 @@ public struct SandboxConfiguration: Equatable, Sendable {
 }
 
 public struct SandboxDetails: Equatable, Sendable {
+    public enum AgentTransport: String, Equatable, Sendable {
+        case publishedTCP = "published_tcp"
+        case containerExec = "container_exec"
+    }
+
     public enum Status: String, Equatable, Sendable {
         case created
         case running
@@ -53,20 +58,23 @@ public struct SandboxDetails: Equatable, Sendable {
     public let sandboxID: String
     public let name: String
     public let imageReference: String
-    public let publishedHostPort: Int
+    public let publishedHostPort: Int?
+    public let agentTransport: AgentTransport
     public let status: Status
 
     public init(
         sandboxID: String,
         name: String,
         imageReference: String,
-        publishedHostPort: Int,
+        publishedHostPort: Int?,
+        agentTransport: AgentTransport = .publishedTCP,
         status: Status
     ) {
         self.sandboxID = sandboxID
         self.name = name
         self.imageReference = imageReference
         self.publishedHostPort = publishedHostPort
+        self.agentTransport = agentTransport
         self.status = status
     }
 }
@@ -102,6 +110,26 @@ public struct ContainerCLIBridge: ContainerRuntimeBridging {
     }
 
     public func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
+        let arguments = createArguments(configuration: configuration, includePublish: true)
+
+        do {
+            let result = try runner.run(arguments: arguments)
+            let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
+            return try inspectSandbox(id: sandboxID)
+        } catch let error as ContainerBridgeError
+            where error.isDarwinPublishUnsupported
+        {
+            let fallbackArguments = createArguments(configuration: configuration, includePublish: false)
+            let result = try runner.run(arguments: fallbackArguments)
+            let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
+            return try inspectSandbox(id: sandboxID)
+        }
+    }
+
+    private func createArguments(
+        configuration: SandboxConfiguration,
+        includePublish: Bool
+    ) -> [String] {
         var arguments = [
             "create",
             "--name", configuration.name,
@@ -111,15 +139,13 @@ public struct ContainerCLIBridge: ContainerRuntimeBridging {
             arguments.append("--gui")
         }
 
-        arguments.append(contentsOf: [
-            "--publish", configuration.publishSpec,
-            configuration.imageReference,
-        ])
-        arguments.append(contentsOf: configuration.initProcessArguments)
+        if includePublish {
+            arguments.append(contentsOf: ["--publish", configuration.publishSpec])
+        }
 
-        let result = try runner.run(arguments: arguments)
-        let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
-        return try inspectSandbox(id: sandboxID)
+        arguments.append(configuration.imageReference)
+        arguments.append(contentsOf: configuration.initProcessArguments)
+        return arguments
     }
 
     public func startSandbox(id: String) throws -> SandboxDetails {
@@ -157,7 +183,11 @@ public struct ContainerCLIBridge: ContainerRuntimeBridging {
     }
 
     public func resolvePublishedHostPort(id: String) throws -> Int {
-        try inspectSandbox(id: id).publishedHostPort
+        guard let publishedHostPort = try inspectSandbox(id: id).publishedHostPort else {
+            throw ContainerBridgeError.publishedPortNotFound(id)
+        }
+
+        return publishedHostPort
     }
 
     private func decodeInspectPayloads(from stdout: String) throws -> [ContainerInspectPayload] {
@@ -298,6 +328,10 @@ private struct ContainerInspectPayload: Decodable {
             let reference: String
         }
 
+        struct Platform: Decodable {
+            let os: String?
+        }
+
         struct PublishedPort: Decodable {
             let containerPort: Int
             let hostPort: Int
@@ -308,6 +342,7 @@ private struct ContainerInspectPayload: Decodable {
 
         let id: String
         let image: Image
+        let platform: Platform?
         let publishedPorts: [PublishedPort]
     }
 
@@ -315,18 +350,42 @@ private struct ContainerInspectPayload: Decodable {
     let configuration: Configuration
 }
 
-private extension SandboxDetails {
-    init(payload: ContainerInspectPayload) throws {
-        guard let publishedPort = payload.configuration.publishedPorts.first else {
-            throw ContainerBridgeError.publishedPortNotFound(payload.configuration.id)
+private extension ContainerBridgeError {
+    var isDarwinPublishUnsupported: Bool {
+        guard case let .commandFailed(_, _, stderr) = self else {
+            return false
         }
 
-        self.init(
-            sandboxID: payload.configuration.id,
-            name: payload.configuration.id,
-            imageReference: payload.configuration.image.reference,
-            publishedHostPort: publishedPort.hostPort,
-            status: .init(containerStatus: payload.status)
-        )
+        return stderr.contains("--publish is not supported for --os darwin")
+    }
+}
+
+private extension SandboxDetails {
+    init(payload: ContainerInspectPayload) throws {
+        if let publishedPort = payload.configuration.publishedPorts.first {
+            self.init(
+                sandboxID: payload.configuration.id,
+                name: payload.configuration.id,
+                imageReference: payload.configuration.image.reference,
+                publishedHostPort: publishedPort.hostPort,
+                agentTransport: .publishedTCP,
+                status: .init(containerStatus: payload.status)
+            )
+            return
+        }
+
+        if payload.configuration.platform?.os == "darwin" {
+            self.init(
+                sandboxID: payload.configuration.id,
+                name: payload.configuration.id,
+                imageReference: payload.configuration.image.reference,
+                publishedHostPort: nil,
+                agentTransport: .containerExec,
+                status: .init(containerStatus: payload.status)
+            )
+            return
+        }
+
+        throw ContainerBridgeError.publishedPortNotFound(payload.configuration.id)
     }
 }

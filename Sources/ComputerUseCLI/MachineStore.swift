@@ -1,6 +1,20 @@
 import ContainerBridge
 import Foundation
 
+public enum MachineAgentTransport: String, Codable, Equatable, Sendable {
+    case publishedTCP = "published_tcp"
+    case containerExec = "container_exec"
+
+    init(_ sandboxTransport: SandboxDetails.AgentTransport) {
+        switch sandboxTransport {
+        case .publishedTCP:
+            self = .publishedTCP
+        case .containerExec:
+            self = .containerExec
+        }
+    }
+}
+
 public struct MachineMetadata: Codable, Equatable, Sendable {
     public enum Status: String, Codable, Sendable {
         case created
@@ -13,6 +27,7 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
     public let imageReference: String
     public let sandboxID: String?
     public let hostPort: Int
+    public let agentTransport: MachineAgentTransport
     public let status: Status
     public let createdAt: Date
     public let updatedAt: Date
@@ -22,6 +37,7 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
         imageReference: String,
         sandboxID: String?,
         hostPort: Int,
+        agentTransport: MachineAgentTransport = .publishedTCP,
         status: Status,
         createdAt: Date,
         updatedAt: Date
@@ -30,14 +46,45 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
         self.imageReference = imageReference
         self.sandboxID = sandboxID
         self.hostPort = hostPort
+        self.agentTransport = agentTransport
         self.status = status
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case imageReference
+        case sandboxID
+        case hostPort
+        case agentTransport
+        case status
+        case createdAt
+        case updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            name: try container.decode(String.self, forKey: .name),
+            imageReference: try container.decode(String.self, forKey: .imageReference),
+            sandboxID: try container.decodeIfPresent(String.self, forKey: .sandboxID),
+            hostPort: try container.decode(Int.self, forKey: .hostPort),
+            agentTransport: try container.decodeIfPresent(
+                MachineAgentTransport.self,
+                forKey: .agentTransport
+            ) ?? .publishedTCP,
+            status: try container.decode(Status.self, forKey: .status),
+            createdAt: try container.decode(Date.self, forKey: .createdAt),
+            updatedAt: try container.decode(Date.self, forKey: .updatedAt)
+        )
+    }
+
     func updating(
         sandboxID: String? = nil,
         hostPort: Int? = nil,
+        agentTransport: MachineAgentTransport? = nil,
         status: Status? = nil,
         updatedAt: Date
     ) -> MachineMetadata {
@@ -46,6 +93,7 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
             imageReference: imageReference,
             sandboxID: sandboxID ?? self.sandboxID,
             hostPort: hostPort ?? self.hostPort,
+            agentTransport: agentTransport ?? self.agentTransport,
             status: status ?? self.status,
             createdAt: createdAt,
             updatedAt: updatedAt
@@ -59,6 +107,7 @@ public struct MachineMetadata: Codable, Equatable, Sendable {
         updating(
             sandboxID: sandbox.sandboxID,
             hostPort: sandbox.publishedHostPort,
+            agentTransport: MachineAgentTransport(sandbox.agentTransport),
             status: .init(sandbox.status),
             updatedAt: updatedAt
         )

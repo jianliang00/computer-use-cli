@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
 
 SOURCE_DIR="${1:-/Volumes/My Shared Files/seed}"
 DESTROOT="${DESTROOT:-}"
@@ -66,6 +67,12 @@ ensure_directory 0755 "$(target /Library/LaunchDaemons)"
 ensure_directory 0755 "$(target /Library/LaunchAgents)"
 ensure_directory 0755 "$(target /var/run/computer-use)"
 ensure_directory 0755 "$(target /Users/admin/Library/Logs)"
+chown_required_live root:wheel \
+  "$(target /usr/local/libexec/computer-use)" \
+  "$(target /var/run/computer-use)"
+chmod 0755 \
+  "$(target /usr/local/libexec/computer-use)" \
+  "$(target /var/run/computer-use)"
 
 rm -rf "$(target /Applications/ComputerUseAgent.app)"
 cp -R "$APP_SOURCE" "$(target /Applications/ComputerUseAgent.app)"
@@ -82,6 +89,7 @@ chown_required_live root:wheel \
   "$(target /Library/LaunchAgents/${AGENT_LABEL}.plist)"
 
 verify_root_wheel "$(target /Applications/ComputerUseAgent.app/Contents/MacOS/computer-use-agent)"
+verify_root_wheel "$(target /usr/local/libexec/computer-use)"
 verify_root_wheel "$(target /usr/local/libexec/computer-use/bootstrap-agent)"
 verify_root_wheel "$(target /Library/LaunchDaemons/${BOOTSTRAP_LABEL}.plist)"
 verify_root_wheel "$(target /Library/LaunchAgents/${AGENT_LABEL}.plist)"

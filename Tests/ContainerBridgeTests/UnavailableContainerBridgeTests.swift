@@ -157,6 +157,43 @@ func containerCLIBridgeAppendsInitArgumentsAfterImage() throws {
     #expect(runner.isExhausted)
 }
 
+@Test
+func containerCLIBridgeFallsBackWhenDarwinPublishIsUnsupported() throws {
+    let runner = QueueContainerCommandRunner(steps: [
+        .failure(
+            arguments: ["create", "--name", "demo", "--gui", "--publish", "127.0.0.1:46000:7777/tcp", "local/computer-use:product"],
+            error: ContainerBridgeError.commandFailed(
+                command: ["container", "create"],
+                exitCode: 1,
+                stderr: #"unsupported: "--publish is not supported for --os darwin""#
+            )
+        ),
+        .success(
+            arguments: ["create", "--name", "demo", "--gui", "local/computer-use:product"],
+            result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
+        ),
+        .success(
+            arguments: ["inspect", "demo"],
+            result: CommandExecutionResult(
+                exitCode: 0,
+                stdout: #"[{"status":"stopped","configuration":{"id":"demo","platform":{"os":"darwin","architecture":"arm64"},"image":{"reference":"local/computer-use:product"},"publishedPorts":[]}}]"#,
+                stderr: ""
+            )
+        ),
+    ])
+    let bridge = ContainerCLIBridge(runner: runner)
+
+    let details = try bridge.createSandbox(configuration: SandboxConfiguration(
+        name: "demo",
+        imageReference: "local/computer-use:product",
+        publishedHostPort: 46000
+    ))
+
+    #expect(details.publishedHostPort == nil)
+    #expect(details.agentTransport == .containerExec)
+    #expect(runner.isExhausted)
+}
+
 private final class QueueContainerCommandRunner: ContainerCommandRunning, @unchecked Sendable {
     struct Step {
         let arguments: [String]
@@ -164,6 +201,10 @@ private final class QueueContainerCommandRunner: ContainerCommandRunning, @unche
 
         static func success(arguments: [String], result: CommandExecutionResult) -> Step {
             Step(arguments: arguments, result: .success(result))
+        }
+
+        static func failure(arguments: [String], error: Error) -> Step {
+            Step(arguments: arguments, result: .failure(error))
         }
     }
 

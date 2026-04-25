@@ -53,15 +53,24 @@
   - `GET /apps` 能列出 Terminal、Finder、Dock 等运行中 app
   - `/state` 在未授权时返回 `403 permission_denied`
   - `/var/run/computer-use/bootstrap-status.json` 已刷新为 `bootstrapped: true`
-- 已基于验证后的临时镜像创建稳定本地基础镜像目录：
-  - `~/Library/Application Support/com.jianliang.OpenBox/macos-images/local-macos-base-latest`
-  - 该目录已通过 `container macos start-vm --agent-probe` 验证 guest agent 可连通
+- 已基于验证后的临时镜像创建稳定本地基础镜像目录，并已将其打包加载为 `local/macos-base:latest`
+- 已构建 `local/computer-use:product`：
+  - `container image inspect local/computer-use:product` 显示 `darwin/arm64`
+  - product OCI 镜像可通过 `container run -d --gui` 启动
+  - guest 内安装文件、LaunchDaemon、LaunchAgent 均存在
+  - bootstrap LaunchDaemon 已加载，`last exit code = 0`
+  - `autoLoginUser` 已配置为 `admin`
+  - 因 `/etc/kcpassword` 尚未 seed，启动后没有 `gui/501` 登录会话，session LaunchAgent 未启动
+- 已适配当前 macOS runtime 对 `--publish` 的限制：
+  - darwin image 创建遇到 `--publish is not supported for --os darwin` 时会自动重试无 publish 创建
+  - 无 published port 的 darwin sandbox 会记录 `agentTransport: "container_exec"`
+  - host 侧 agent 请求会通过 `container exec <sandbox> curl 127.0.0.1:7777` 转发
+- 已通过真实 CLI 验证 `computer-use machine create/start` 可启动 `local/computer-use:product` 并写入 `agentTransport: "container_exec"`
 
 尚未完成：
 
-- 本地 `container build` 的 darwin/arm64 OCI base image tag 尚不可用，product image build 未验证
 - auto-login 仍需在授权镜像准备阶段 seed `/etc/kcpassword`
-- authorized image 流程和完整 host-side macOS machine 生命周期验证
+- authorized image 流程和完整授权后 agent 能力验证
 
 ## 任务清单
 
@@ -266,9 +275,13 @@
   当前状态：
   - 已有 Dockerfile、installer、LaunchDaemon、LaunchAgent 和 image context 准备脚本
   - 已在克隆 guest 中验证 live install、LaunchDaemon、LaunchAgent、HTTP health 和 bootstrap status
-  - 已创建稳定本地基础镜像目录并验证 guest agent 可连通
-  - 尚未通过 `container build` 生成 product image；当前本机缺少 darwin/arm64 macOS OCI base image tag
-  - auto-login 仍需在 authorized image 准备时 seed `/etc/kcpassword`
+  - 已创建稳定本地基础镜像目录，验证 guest agent 可连通，并加载为 `local/macos-base:latest`
+  - 已通过 `container build --platform darwin/arm64` 生成 `local/computer-use:product`
+  - `local/computer-use:product` 可通过 `container run -d --gui` 启动
+  - product guest 内 bootstrap LaunchDaemon 已加载，安装文件存在
+  - 当前 runtime 对 darwin 镜像不支持 `--publish`；host-side 访问路径已改为 `container_exec`
+  - 已通过真实 CLI 验证 product machine 可启动，metadata 会记录 `agentTransport: "container_exec"`
+  - auto-login 仍需在 authorized image 准备时 seed `/etc/kcpassword`；未 seed 时不会出现 `gui/501`，session agent 不会自动启动
 
 - [ ] T11 产出 authorized image
   目标：

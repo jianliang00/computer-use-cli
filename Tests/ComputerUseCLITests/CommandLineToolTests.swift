@@ -200,6 +200,41 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
 }
 
 @Test
+func agentCommandsUseContainerExecURLForDarwinSandboxesWithoutPublishedPorts() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = ContainerExecSandboxBridge()
+    let agentClient = StubAgentClient()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_275) },
+        containerBridge: bridge,
+        agentClient: agentClient
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:product",
+    ])
+    let started = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+    #expect(started.contains("\"agentTransport\" : \"container_exec\""))
+
+    _ = try tool.run(arguments: [
+        "agent",
+        "ping",
+        "--machine", "demo",
+    ])
+
+    #expect(agentClient.baseURLs.map(\.absoluteString) == ["container-exec://demo"])
+}
+
+@Test
 func machineInspectRepairsMetadataWhenSandboxAlreadyExists() throws {
     let homeDirectory = try temporaryDirectory()
     let bridge = ExistingSandboxBridge()
@@ -418,6 +453,56 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     func perform(baseURL: URL, request: ElementActionRequest) throws -> ActionResponse {
         baseURLs.append(baseURL)
         return ActionResponse()
+    }
+}
+
+private final class ContainerExecSandboxBridge: ContainerRuntimeBridging, @unchecked Sendable {
+    private var states: [String: SandboxDetails.Status] = [:]
+
+    func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
+        states[configuration.name] = .stopped
+        return details(for: configuration.name, status: .stopped)
+    }
+
+    func startSandbox(id: String) throws -> SandboxDetails {
+        states[id] = .running
+        return details(for: id, status: .running)
+    }
+
+    func inspectSandbox(id: String) throws -> SandboxDetails {
+        guard let state = states[id] else {
+            throw ContainerBridgeError.sandboxNotFound(id)
+        }
+
+        return details(for: id, status: state)
+    }
+
+    func stopSandbox(id: String) throws -> SandboxDetails {
+        states[id] = .stopped
+        return details(for: id, status: .stopped)
+    }
+
+    func removeSandbox(id: String) throws {
+        states.removeValue(forKey: id)
+    }
+
+    func queryLogs(id: String) throws -> SandboxLogs {
+        SandboxLogs(sandboxID: id, entries: [])
+    }
+
+    func resolvePublishedHostPort(id: String) throws -> Int {
+        throw ContainerBridgeError.publishedPortNotFound(id)
+    }
+
+    private func details(for id: String, status: SandboxDetails.Status) -> SandboxDetails {
+        SandboxDetails(
+            sandboxID: id,
+            name: id,
+            imageReference: "local/computer-use:product",
+            publishedHostPort: nil,
+            agentTransport: .containerExec,
+            status: status
+        )
     }
 }
 

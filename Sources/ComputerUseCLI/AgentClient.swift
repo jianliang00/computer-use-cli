@@ -1,4 +1,5 @@
 import AgentProtocol
+import ContainerBridge
 import Foundation
 
 public protocol AgentClienting: Sendable {
@@ -18,7 +19,7 @@ public protocol AgentClienting: Sendable {
 public struct AgentHTTPClient: AgentClienting {
     private let transport: any AgentHTTPTransporting
 
-    public init(transport: any AgentHTTPTransporting = URLSessionAgentHTTPTransport()) {
+    public init(transport: any AgentHTTPTransporting = DefaultAgentHTTPTransport()) {
         self.transport = transport
     }
 
@@ -125,6 +126,27 @@ public protocol AgentHTTPTransporting: Sendable {
     func send(_ request: URLRequest) throws -> AgentHTTPTransportResponse
 }
 
+public struct DefaultAgentHTTPTransport: AgentHTTPTransporting {
+    private let urlSessionTransport: any AgentHTTPTransporting
+    private let containerExecTransport: any AgentHTTPTransporting
+
+    public init(
+        urlSessionTransport: any AgentHTTPTransporting = URLSessionAgentHTTPTransport(),
+        containerExecTransport: any AgentHTTPTransporting = ContainerExecAgentHTTPTransport()
+    ) {
+        self.urlSessionTransport = urlSessionTransport
+        self.containerExecTransport = containerExecTransport
+    }
+
+    public func send(_ request: URLRequest) throws -> AgentHTTPTransportResponse {
+        if request.url?.scheme == "container-exec" {
+            return try containerExecTransport.send(request)
+        }
+
+        return try urlSessionTransport.send(request)
+    }
+}
+
 public struct URLSessionAgentHTTPTransport: AgentHTTPTransporting {
     private let session: URLSession
 
@@ -162,6 +184,110 @@ public struct URLSessionAgentHTTPTransport: AgentHTTPTransporting {
         }
 
         return try completed.get()
+    }
+}
+
+public struct ContainerExecAgentHTTPTransport: AgentHTTPTransporting {
+    private static let statusMarker = "__CU_HTTP_STATUS__:"
+
+    private let runner: any ContainerCommandRunning
+    private let agentPort: Int
+    private let timeoutSeconds: Int
+
+    public init(
+        runner: any ContainerCommandRunning = ProcessContainerCommandRunner(),
+        agentPort: Int = 7777,
+        timeoutSeconds: Int = 30
+    ) {
+        self.runner = runner
+        self.agentPort = agentPort
+        self.timeoutSeconds = timeoutSeconds
+    }
+
+    public func send(_ request: URLRequest) throws -> AgentHTTPTransportResponse {
+        guard let url = request.url,
+              url.scheme == "container-exec",
+              let sandboxID = url.host,
+              sandboxID.isEmpty == false
+        else {
+            throw AgentClientError.invalidHTTPResponse
+        }
+
+        let result = try runner.run(arguments: curlArguments(
+            sandboxID: sandboxID,
+            request: request,
+            agentURL: agentURL(for: url)
+        ))
+
+        return try parseCurlOutput(result.stdout)
+    }
+
+    private func curlArguments(
+        sandboxID: String,
+        request: URLRequest,
+        agentURL: String
+    ) -> [String] {
+        let method = request.httpMethod ?? "GET"
+        guard let body = request.httpBody, body.isEmpty == false else {
+            return [
+                "exec", sandboxID,
+                "/usr/bin/curl",
+                "-sS",
+                "--max-time", "\(timeoutSeconds)",
+                "-w", "\n\(Self.statusMarker)%{http_code}\n",
+                "-X", method,
+                agentURL,
+            ]
+        }
+
+        let encodedBody = body.base64EncodedString()
+        let script = """
+        set -e
+        body_file="/tmp/computer-use-agent-request-$$.json"
+        trap 'rm -f "$body_file"' EXIT
+        printf "%s" "$1" | /usr/bin/base64 -D > "$body_file"
+        /usr/bin/curl -sS --max-time "\(timeoutSeconds)" -w "\\n\(Self.statusMarker)%{http_code}\\n" -X "$2" -H "Content-Type: application/json" --data-binary "@$body_file" "$3"
+        """
+
+        return [
+            "exec", sandboxID,
+            "/bin/sh", "-c", script,
+            "sh",
+            encodedBody,
+            method,
+            agentURL,
+        ]
+    }
+
+    private func agentURL(for url: URL) -> String {
+        var path = url.path.isEmpty ? "/" : url.path
+        if let query = url.query, query.isEmpty == false {
+            path += "?\(query)"
+        }
+
+        return "http://127.0.0.1:\(agentPort)\(path)"
+    }
+
+    private func parseCurlOutput(_ stdout: String) throws -> AgentHTTPTransportResponse {
+        guard let markerRange = stdout.range(
+            of: "\n\(Self.statusMarker)",
+            options: .backwards
+        ) else {
+            throw AgentClientError.invalidHTTPResponse
+        }
+
+        let body = stdout[..<markerRange.lowerBound]
+        let statusText = stdout[markerRange.upperBound...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let statusCode = Int(statusText) else {
+            throw AgentClientError.invalidHTTPResponse
+        }
+
+        return AgentHTTPTransportResponse(
+            statusCode: statusCode,
+            body: Data(String(body).utf8)
+        )
     }
 }
 

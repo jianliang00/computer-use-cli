@@ -51,6 +51,12 @@ forwarding computer-use commands to a session agent running inside the guest.
   and LaunchAgent registration, `GET /health`, `GET /permissions`, `GET /apps`,
   expected `/state` permission denial, and `bootstrap-status.json`
   `bootstrapped: true` inside a cloned macOS guest.
+- The validated macOS base has been packaged and loaded as
+  `local/macos-base:latest`.
+- `local/computer-use:product` builds successfully from that base and can be
+  started by the macOS container runtime.
+- macOS images that cannot use `--publish` are handled by falling back to
+  `container exec` transport for agent HTTP requests.
 - The session agent implements:
   - `GET /health`
   - `GET /permissions` using macOS Accessibility and Screen Recording checks
@@ -63,9 +69,7 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 ## Remaining Work
 
-- Build the product image once a local darwin/arm64 macOS base image tag is
-  available to `container build`.
 - Seed auto-login and complete the authorized image flow for Accessibility and
   Screen Recording.
-- Validate the full host-side macOS machine lifecycle against the product or
-  authorized image.
+- Validate the full authorized-image lifecycle after the GUI session and
+  permissions are persisted.

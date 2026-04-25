@@ -1,5 +1,6 @@
 import AgentProtocol
 import ComputerUseCLI
+import ContainerBridge
 import Foundation
 import Testing
 
@@ -80,6 +81,57 @@ func agentHTTPClientDecodesProtocolErrors() throws {
     }
 }
 
+@Test
+func containerExecTransportRunsCurlInsideSandbox() throws {
+    let runner = RecordingContainerCommandRunner(result: CommandExecutionResult(
+        exitCode: 0,
+        stdout: #"{"ok":true,"version":"0.1.0"}"# + "\n__CU_HTTP_STATUS__:200\n",
+        stderr: ""
+    ))
+    let transport = ContainerExecAgentHTTPTransport(runner: runner)
+    let request = URLRequest(url: try #require(URL(string: "container-exec://demo/health")))
+
+    let response = try transport.send(request)
+
+    #expect(response.statusCode == 200)
+    #expect(String(decoding: response.body, as: UTF8.self) == #"{"ok":true,"version":"0.1.0"}"#)
+    #expect(runner.arguments == [
+        "exec", "demo",
+        "/usr/bin/curl",
+        "-sS",
+        "--max-time", "30",
+        "-w", "\n__CU_HTTP_STATUS__:%{http_code}\n",
+        "-X", "GET",
+        "http://127.0.0.1:7777/health",
+    ])
+}
+
+@Test
+func containerExecTransportSendsPostBodyThroughBase64() throws {
+    let runner = RecordingContainerCommandRunner(result: CommandExecutionResult(
+        exitCode: 0,
+        stdout: #"{"ok":true}"# + "\n__CU_HTTP_STATUS__:200\n",
+        stderr: ""
+    ))
+    let transport = ContainerExecAgentHTTPTransport(runner: runner)
+    var request = URLRequest(url: try #require(URL(string: "container-exec://demo/actions/type")))
+    request.httpMethod = "POST"
+    request.httpBody = Data(#"{"text":"hello"}"#.utf8)
+
+    _ = try transport.send(request)
+
+    #expect(Array(runner.arguments.prefix(4)) == [
+        "exec", "demo",
+        "/bin/sh", "-c",
+    ])
+    #expect(runner.arguments[4].contains("/usr/bin/base64 -D"))
+    #expect(Array(runner.arguments.suffix(3)) == [
+        #"eyJ0ZXh0IjoiaGVsbG8ifQ=="#,
+        "POST",
+        "http://127.0.0.1:7777/actions/type",
+    ])
+}
+
 private final class QueueAgentHTTPTransport: AgentHTTPTransporting, @unchecked Sendable {
     struct Step {
         let method: String
@@ -111,5 +163,19 @@ private final class QueueAgentHTTPTransport: AgentHTTPTransporting, @unchecked S
         }
 
         return step.response
+    }
+}
+
+private final class RecordingContainerCommandRunner: ContainerCommandRunning, @unchecked Sendable {
+    private let result: CommandExecutionResult
+    private(set) var arguments: [String] = []
+
+    init(result: CommandExecutionResult) {
+        self.result = result
+    }
+
+    func run(arguments: [String]) throws -> CommandExecutionResult {
+        self.arguments = arguments
+        return result
     }
 }

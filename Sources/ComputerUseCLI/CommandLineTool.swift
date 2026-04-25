@@ -245,7 +245,7 @@ public struct CommandLineTool {
 
     private func agentDoctorReport(machineName: String) throws -> AgentDoctorReport {
         let metadata = try machineService.inspect(name: machineName)
-        let baseURL = agentBaseURL(from: metadata)
+        let baseURL = try agentBaseURL(from: metadata)
         var health: HealthResponse?
         var permissions: PermissionsResponse?
         var errors: [String] = []
@@ -271,6 +271,7 @@ public struct CommandLineTool {
             sandboxID: metadata.sandboxID,
             sandboxRunning: metadata.status == .running,
             publishedHostPort: metadata.hostPort,
+            agentTransport: metadata.agentTransport,
             bootstrapReady: nil,
             sessionAgentReady: health?.ok == true,
             accessibility: permissions?.accessibility,
@@ -285,11 +286,20 @@ public struct CommandLineTool {
             throw CLIError.machineNotRunning(name, metadata.status.rawValue)
         }
 
-        return agentBaseURL(from: metadata)
+        return try agentBaseURL(from: metadata)
     }
 
-    private func agentBaseURL(from metadata: MachineMetadata) -> URL {
-        URL(string: "http://127.0.0.1:\(metadata.hostPort)")!
+    private func agentBaseURL(from metadata: MachineMetadata) throws -> URL {
+        switch metadata.agentTransport {
+        case .publishedTCP:
+            return URL(string: "http://127.0.0.1:\(metadata.hostPort)")!
+        case .containerExec:
+            guard let sandboxID = metadata.sandboxID else {
+                throw CLIError.sandboxNotCreated(metadata.name)
+            }
+
+            return URL(string: "container-exec://\(sandboxID)")!
+        }
     }
 
     private func clickTarget(from flags: ParsedFlags) throws -> ClickActionRequest.Target {
@@ -379,6 +389,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
     public let sandboxID: String?
     public let sandboxRunning: Bool
     public let publishedHostPort: Int
+    public let agentTransport: MachineAgentTransport
     public let bootstrapReady: Bool?
     public let sessionAgentReady: Bool
     public let accessibility: Bool?
@@ -390,6 +401,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
         sandboxID: String?,
         sandboxRunning: Bool,
         publishedHostPort: Int,
+        agentTransport: MachineAgentTransport = .publishedTCP,
         bootstrapReady: Bool?,
         sessionAgentReady: Bool,
         accessibility: Bool?,
@@ -400,6 +412,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
         self.sandboxID = sandboxID
         self.sandboxRunning = sandboxRunning
         self.publishedHostPort = publishedHostPort
+        self.agentTransport = agentTransport
         self.bootstrapReady = bootstrapReady
         self.sessionAgentReady = sessionAgentReady
         self.accessibility = accessibility
@@ -412,6 +425,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
         case sandboxID = "sandbox_id"
         case sandboxRunning = "sandbox_running"
         case publishedHostPort = "published_host_port"
+        case agentTransport = "agent_transport"
         case bootstrapReady = "bootstrap_ready"
         case sessionAgentReady = "session_agent_ready"
         case accessibility
@@ -425,6 +439,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
         try container.encode(sandboxID, forKey: .sandboxID)
         try container.encode(sandboxRunning, forKey: .sandboxRunning)
         try container.encode(publishedHostPort, forKey: .publishedHostPort)
+        try container.encode(agentTransport, forKey: .agentTransport)
         try container.encode(bootstrapReady, forKey: .bootstrapReady)
         try container.encode(sessionAgentReady, forKey: .sessionAgentReady)
         try container.encode(accessibility, forKey: .accessibility)
@@ -530,6 +545,7 @@ public enum CLIError: Error, LocalizedError, Equatable {
     case invalidFlagValue(String, String)
     case invalidFlagCombination(String)
     case machineNotRunning(String, String)
+    case sandboxNotCreated(String)
 
     public var errorDescription: String? {
         switch self {
@@ -553,6 +569,8 @@ public enum CLIError: Error, LocalizedError, Equatable {
             message
         case let .machineNotRunning(name, status):
             "machine \(name) is \(status), not running"
+        case let .sandboxNotCreated(name):
+            "machine \(name) does not have a created sandbox"
         }
     }
 }
