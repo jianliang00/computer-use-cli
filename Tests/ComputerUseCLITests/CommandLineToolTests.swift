@@ -151,6 +151,13 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
     ])
     #expect(permissions.contains("\"screen_recording\" : false"))
 
+    let permissionRequest = try tool.run(arguments: [
+        "permissions",
+        "request",
+        "--machine", "demo",
+    ])
+    #expect(permissionRequest.contains("\"screen_recording\" : false"))
+
     let apps = try tool.run(arguments: [
         "apps",
         "list",
@@ -390,6 +397,11 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     }
 
     func permissions(baseURL: URL) throws -> PermissionsResponse {
+        baseURLs.append(baseURL)
+        return PermissionsResponse(accessibility: true, screenRecording: false)
+    }
+
+    func requestPermissions(baseURL: URL) throws -> PermissionsResponse {
         baseURLs.append(baseURL)
         return PermissionsResponse(accessibility: true, screenRecording: false)
     }

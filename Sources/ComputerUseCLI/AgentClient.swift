@@ -5,6 +5,7 @@ import Foundation
 public protocol AgentClienting: Sendable {
     func health(baseURL: URL) throws -> HealthResponse
     func permissions(baseURL: URL) throws -> PermissionsResponse
+    func requestPermissions(baseURL: URL) throws -> PermissionsResponse
     func apps(baseURL: URL) throws -> AppsResponse
     func state(baseURL: URL, request: StateRequest) throws -> StateResponse
     func click(baseURL: URL, request: ClickActionRequest) throws -> ActionResponse
@@ -29,6 +30,10 @@ public struct AgentHTTPClient: AgentClienting {
 
     public func permissions(baseURL: URL) throws -> PermissionsResponse {
         try get("/permissions", baseURL: baseURL)
+    }
+
+    public func requestPermissions(baseURL: URL) throws -> PermissionsResponse {
+        try post("/permissions/request", baseURL: baseURL, body: EmptyRequestBody())
     }
 
     public func apps(baseURL: URL) throws -> AppsResponse {
@@ -111,6 +116,8 @@ public struct AgentHTTPClient: AgentClienting {
         return url
     }
 }
+
+private struct EmptyRequestBody: Encodable {}
 
 public struct AgentHTTPTransportResponse: Equatable, Sendable {
     public let statusCode: Int

@@ -69,7 +69,13 @@ public struct AgentStateSnapshot: Codable, Equatable, Sendable {
 }
 
 public protocol StateCapturing: Sendable {
-    func captureState() async throws -> AgentStateSnapshot
+    func captureState(bundleIdentifier: String?) async throws -> AgentStateSnapshot
+}
+
+public extension StateCapturing {
+    func captureState() async throws -> AgentStateSnapshot {
+        try await captureState(bundleIdentifier: nil)
+    }
 }
 
 public struct MacOSStateCapturer: StateCapturing {
@@ -90,12 +96,16 @@ public struct MacOSStateCapturer: StateCapturing {
         self.maxAccessibilityNodes = maxAccessibilityNodes
     }
 
-    public func captureState() async throws -> AgentStateSnapshot {
+    public func captureState(bundleIdentifier: String? = nil) async throws -> AgentStateSnapshot {
         let snapshotID = UUID().uuidString
         let applications = try await applicationLister.runningApplications()
         let screenshot = try await captureScreenshot()
         let root = captureAccessibilityRoot(
             snapshotID: snapshotID,
+            targetApplication: selectedApplication(
+                applications: applications,
+                bundleIdentifier: bundleIdentifier
+            ),
             applications: applications
         )
 
@@ -140,9 +150,11 @@ public struct MacOSStateCapturer: StateCapturing {
 
     private func captureAccessibilityRoot(
         snapshotID: String,
+        targetApplication: RunningApplication?,
         applications: [RunningApplication]
     ) -> AccessibilityNode {
-        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let pid = targetApplication?.processIdentifier
+            ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
             ?? applications.first(where: \.isFrontmost)?.processIdentifier
             ?? applications.first?.processIdentifier
 
@@ -189,6 +201,17 @@ public struct MacOSStateCapturer: StateCapturing {
         let root = buildNode(from: element, depth: 0)
         elementCache?.store(snapshotID: snapshotID, elements: elements)
         return root
+    }
+
+    private func selectedApplication(
+        applications: [RunningApplication],
+        bundleIdentifier: String?
+    ) -> RunningApplication? {
+        guard let bundleIdentifier else {
+            return nil
+        }
+
+        return applications.first { $0.bundleIdentifier == bundleIdentifier }
     }
 
     private func accessibilityChildren(of element: AXUIElement) -> [AXUIElement] {

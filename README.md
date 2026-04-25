@@ -26,6 +26,7 @@ forwarding computer-use commands to a session agent running inside the guest.
   - `computer-use agent ping --machine <name>`
   - `computer-use agent doctor --machine <name>`
   - `computer-use permissions get --machine <name>`
+  - `computer-use permissions request --machine <name>`
   - `computer-use apps list --machine <name>`
   - `computer-use state get --machine <name> [--bundle-id <bundle-id>]`
   - `computer-use action click --machine <name> (--x <x> --y <y> | --snapshot-id <id> --element-id <id>)`
@@ -70,18 +71,25 @@ forwarding computer-use commands to a session agent running inside the guest.
 - A real CLI smoke against `local/computer-use:authorized` validates
   machine create/start, `agent ping`, `agent doctor`, permissions, apps,
   Finder state capture, and Finder scroll/click actions.
+- A live authorized guest updated with the latest agent build validates the
+  TextEdit workflow end to end: `/apps` lists `com.apple.TextEdit`,
+  `state get --bundle-id com.apple.TextEdit` returns a TextEdit snapshot, and
+  `action type` updates the `AXTextArea` value.
 - The session agent implements:
   - `GET /health`
   - `GET /permissions` using macOS Accessibility and Screen Recording checks
-  - `GET /apps` using `NSWorkspace`
+  - `POST /permissions/request` to re-trigger TCC prompts after replacing the
+    agent app bundle
+  - `GET /apps` using `NSWorkspace` plus a process-table fallback for GUI apps
+    that do not surface in the workspace list
   - `POST /state` using ScreenCaptureKit for PNG screenshots and AX APIs for
-    a basic accessibility tree
+    a basic accessibility tree, targeting the requested bundle id when one is
+    supplied
   - snapshot cache with 8-snapshot capacity and 60-second TTL
   - `click`, `type`, `key`, `drag`, and `scroll` through CoreGraphics
   - `set-value` and AX `action` through cached snapshot elements
 
 ## Remaining Work
 
-- Finish the repeatable app-level workflow smoke for TextEdit input and a
-  Finder or Safari foreground interaction. During validation, TextEdit launched
-  as a process but did not appear in the agent `NSWorkspace` application list.
+- Repackage and reload the local `authorized` image with the latest session
+  agent build, then rerun the host-side CLI smoke from a fresh guest.

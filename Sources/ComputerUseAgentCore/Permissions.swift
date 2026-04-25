@@ -47,6 +47,10 @@ public protocol PermissionStatusProviding: Sendable {
     func currentPermissions() async throws -> PermissionSnapshot
 }
 
+public protocol PermissionRequesting: Sendable {
+    func requestPermissions() async throws -> PermissionSnapshot
+}
+
 public struct MacOSPermissionStatusProvider: PermissionStatusProviding {
     public init() {}
 
@@ -55,5 +59,20 @@ public struct MacOSPermissionStatusProvider: PermissionStatusProviding {
             accessibility: AXIsProcessTrusted() ? .authorized : .denied,
             screenRecording: CGPreflightScreenCaptureAccess() ? .authorized : .denied
         )
+    }
+}
+
+public struct MacOSPermissionRequester: PermissionRequesting {
+    private let statusProvider: any PermissionStatusProviding
+
+    public init(statusProvider: any PermissionStatusProviding = MacOSPermissionStatusProvider()) {
+        self.statusProvider = statusProvider
+    }
+
+    public func requestPermissions() async throws -> PermissionSnapshot {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        _ = CGRequestScreenCaptureAccess()
+        return try await statusProvider.currentPermissions()
     }
 }

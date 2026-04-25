@@ -54,6 +54,8 @@ public final class SessionAgentHTTPRouter: Sendable {
                 return try json(HealthResponse(ok: true, version: "0.1.0"))
             case (.get, "/permissions"):
                 return try await permissions()
+            case (.post, "/permissions/request"):
+                return try await requestPermissions()
             case (.get, "/apps"):
                 return try await apps()
             case (.post, "/state"):
@@ -108,6 +110,14 @@ public final class SessionAgentHTTPRouter: Sendable {
         ))
     }
 
+    private func requestPermissions() async throws -> SessionAgentHTTPResponse {
+        let snapshot = try await agent.requestPermissions()
+        return try json(PermissionsResponse(
+            accessibility: snapshot.accessibility == .authorized,
+            screenRecording: snapshot.screenRecording == .authorized
+        ))
+    }
+
     private func apps() async throws -> SessionAgentHTTPResponse {
         let applications = try await agent.runningApplications()
         return try json(AppsResponse(
@@ -124,7 +134,7 @@ public final class SessionAgentHTTPRouter: Sendable {
 
     private func state(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let stateRequest = try decode(StateRequest.self, from: request)
-        let snapshot = try await agent.captureState()
+        let snapshot = try await agent.captureState(bundleIdentifier: stateRequest.bundleID)
         let app = selectedApplication(
             applications: snapshot.applications,
             bundleID: stateRequest.bundleID

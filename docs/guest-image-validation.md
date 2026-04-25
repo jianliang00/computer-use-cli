@@ -154,10 +154,20 @@ Latest run: 2026-04-25.
   for `container exec` to exit before reading stdout. `ProcessContainerCommandRunner`
   now drains stdout/stderr concurrently while the subprocess runs, and the
   Finder `state get` command passes through the CLI.
-- TextEdit remains a full workflow gap: `/System/Applications/TextEdit.app`
-  launched as the `admin` process, but it did not appear in the agent
-  `NSWorkspace` running application list, so `state get --bundle-id
-  com.apple.TextEdit` returned `app_not_found`.
+- The TextEdit foreground/app discovery gap was fixed in a live authorized
+  guest updated with the latest `ComputerUseAgent.app` build:
+  - `/apps` listed `com.apple.TextEdit` with the launched `admin` PID.
+  - `POST /state` with `{"bundle_id":"com.apple.TextEdit"}` returned a
+    TextEdit snapshot with a PNG screenshot (base64 length about `4445288`)
+    and 360 AX nodes.
+  - `POST /actions/type` updated the `AXTextArea` value to
+    `Hello from codex`.
+  - The fix combines a process-table fallback for `/apps` and a `/state`
+    implementation that targets the requested bundle id instead of always
+    walking the frontmost app.
+  - `POST /permissions/request` and
+    `computer-use permissions request --machine <name>` were added to re-open
+    TCC prompts after replacing `/Applications/ComputerUseAgent.app`.
 
 ## Notes
 
@@ -168,8 +178,10 @@ Latest run: 2026-04-25.
 - Authorized image validation is complete for auto-login, persisted Accessibility
   and Screen Recording permissions, agent health, apps, and state capture.
 - Host CLI validation is complete through Finder state and basic actions over
-  the darwin `container_exec` transport; TextEdit foreground/app discovery still
-  needs follow-up before marking the full app workflow smoke complete.
+  the darwin `container_exec` transport. The TextEdit discovery/state/type fix
+  is validated in a live authorized guest; the remaining follow-up is
+  regenerating the local `authorized` OCI artifact from a clean source image
+  directory and rerunning the fresh-guest smoke.
 - If `container image load` appears idle after packaging, verify
   `container system status` is using the OpenBox app root
   `~/Library/Application Support/com.jianliang.OpenBox/container/`. Restarting

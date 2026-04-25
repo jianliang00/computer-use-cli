@@ -69,8 +69,8 @@
 
 尚未完成：
 
-- auto-login 仍需在授权镜像准备阶段 seed `/etc/kcpassword`
-- authorized image 流程和完整授权后 agent 能力验证
+- 用最新 session agent 重新打包并重新加载本地 `authorized image`，再重跑
+  fresh-guest smoke
 
 ## 任务清单
 
@@ -313,6 +313,15 @@
     `autoLoginUser=admin`、`/dev/console=admin 501`、LaunchAgent 运行、
     `/health` 正常、`/permissions` 为 Accessibility 和 Screen Recording
     双 true、`/state` 返回 Finder PNG screenshot 和 270 个 AX nodes
+  - 替换为最新 `ComputerUseAgent.app` 后，在 live authorized guest 中再次验证：
+    `/apps` 可发现 `com.apple.TextEdit`，`/state --bundle-id
+    com.apple.TextEdit` 可返回 TextEdit screenshot 和 AX tree，
+    `/actions/type` 可写入 `Hello from codex`
+  - 为支持替换 app 后重新授权，新增 `POST /permissions/request` 和
+    `computer-use permissions request --machine <name>`
+  - 当前剩余宿主机收尾工作：从干净源 guest 重新生成并重新加载本地
+    `authorized image`；本轮一次 `No space left on device` 中断后生成的
+    host-side 归档不完整，不能作为最终工件
 
 - [x] T12 实现 `agent ping` 与 `agent doctor`
   目标：

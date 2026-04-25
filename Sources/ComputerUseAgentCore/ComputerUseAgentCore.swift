@@ -17,18 +17,21 @@ public enum ComputerUseAgentCoreError: Error, LocalizedError, Equatable, Sendabl
 
 public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
     private let permissionProvider: any PermissionStatusProviding
+    private let permissionRequester: any PermissionRequesting
     private let applicationLister: any RunningApplicationListing
     private let stateCapturer: any StateCapturing
     private let actionPerformer: any ActionPerforming
 
     public init(
         permissionProvider: any PermissionStatusProviding = MacOSPermissionStatusProvider(),
+        permissionRequester: (any PermissionRequesting)? = nil,
         applicationLister: any RunningApplicationListing = WorkspaceRunningApplicationLister(),
         stateCapturer: (any StateCapturing)? = nil,
         actionPerformer: (any ActionPerforming)? = nil
     ) {
         let elementCache = MacOSSnapshotElementCache()
         self.permissionProvider = permissionProvider
+        self.permissionRequester = permissionRequester ?? MacOSPermissionRequester(statusProvider: permissionProvider)
         self.applicationLister = applicationLister
         self.stateCapturer = stateCapturer ?? MacOSStateCapturer(
             applicationLister: applicationLister,
@@ -41,12 +44,20 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
         try await permissionProvider.currentPermissions()
     }
 
+    public func requestPermissions() async throws -> PermissionSnapshot {
+        try await permissionRequester.requestPermissions()
+    }
+
     public func runningApplications() async throws -> [RunningApplication] {
         try await applicationLister.runningApplications()
     }
 
     public func captureState() async throws -> AgentStateSnapshot {
-        try await stateCapturer.captureState()
+        try await captureState(bundleIdentifier: nil)
+    }
+
+    public func captureState(bundleIdentifier: String?) async throws -> AgentStateSnapshot {
+        try await stateCapturer.captureState(bundleIdentifier: bundleIdentifier)
     }
 
     public func click(_ request: ClickActionRequest) async throws -> ActionReceipt {

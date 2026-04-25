@@ -18,6 +18,18 @@ func agentHTTPClientBuildsExpectedRequests() throws {
         ),
         .init(
             method: "POST",
+            path: "/permissions/request",
+            body: #"{}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(PermissionsResponse(
+                    accessibility: false,
+                    screenRecording: false
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
             path: "/state",
             body: #"{"bundle_id":"com.apple.TextEdit"}"#,
             response: AgentHTTPTransportResponse(
@@ -37,6 +49,9 @@ func agentHTTPClientBuildsExpectedRequests() throws {
 
     let health = try client.health(baseURL: baseURL)
     #expect(health == HealthResponse(ok: true, version: "0.1.0"))
+
+    let permissions = try client.requestPermissions(baseURL: baseURL)
+    #expect(permissions == PermissionsResponse(accessibility: false, screenRecording: false))
 
     let state = try client.state(
         baseURL: baseURL,

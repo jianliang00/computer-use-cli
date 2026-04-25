@@ -20,6 +20,12 @@ func sessionAgentHTTPRouterServesHealthPermissionsAndApps() async throws {
     #expect(permissions.accessibility)
     #expect(permissions.screenRecording)
 
+    let permissionRequestResponse = await router.handle(SessionAgentHTTPRequest(method: .post, path: "/permissions/request"))
+    #expect(permissionRequestResponse.statusCode == 200)
+    let requestedPermissions = try AgentProtocolJSON.decode(PermissionsResponse.self, from: permissionRequestResponse.body)
+    #expect(requestedPermissions.accessibility)
+    #expect(requestedPermissions.screenRecording)
+
     let appsResponse = await router.handle(SessionAgentHTTPRequest(method: .get, path: "/apps"))
     #expect(appsResponse.statusCode == 200)
     let apps = try AgentProtocolJSON.decode(AppsResponse.self, from: appsResponse.body)
@@ -51,6 +57,7 @@ func sessionAgentHTTPRouterMapsStateAndActions() async throws {
     #expect(state.app.bundleID == "com.apple.TextEdit")
     #expect(state.screenshot.base64 == Data([1, 2, 3]).base64EncodedString())
     #expect(state.axTree.nodes.map(\.id) == ["root", "text"])
+    #expect(agent.stateBundleIdentifiers == ["com.apple.TextEdit"])
 
     let clickRequest = SessionAgentHTTPRequest(
         method: .post,
@@ -115,8 +122,13 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
         ),
     ]
     private(set) var clicks: [ComputerUseAgentCore.ClickActionRequest] = []
+    private(set) var stateBundleIdentifiers: [String?] = []
 
     func currentPermissions() async throws -> PermissionSnapshot {
+        permissions
+    }
+
+    func requestPermissions() async throws -> PermissionSnapshot {
         permissions
     }
 
@@ -124,8 +136,9 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
         applications
     }
 
-    func captureState() async throws -> AgentStateSnapshot {
-        AgentStateSnapshot(
+    func captureState(bundleIdentifier: String?) async throws -> AgentStateSnapshot {
+        stateBundleIdentifiers.append(bundleIdentifier)
+        return AgentStateSnapshot(
             snapshotID: "snap-001",
             screenshot: ScreenshotFrame(
                 encoding: .png,

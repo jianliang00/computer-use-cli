@@ -130,6 +130,10 @@ public struct CommandLineTool {
             let name = try flags.requiredValue(for: "--machine")
             let baseURL = try agentBaseURL(forMachine: name)
             return try JSONOutput.render(agentClient.permissions(baseURL: baseURL))
+        case "request":
+            let name = try flags.requiredValue(for: "--machine")
+            let baseURL = try agentBaseURL(forMachine: name)
+            return try JSONOutput.render(agentClient.requestPermissions(baseURL: baseURL))
         default:
             throw CLIError.unknownSubcommand("permissions", subcommand)
         }
@@ -371,6 +375,7 @@ public struct CommandLineTool {
           computer-use agent ping --machine <name>
           computer-use agent doctor --machine <name>
           computer-use permissions get --machine <name>
+          computer-use permissions request --machine <name>
           computer-use apps list --machine <name>
           computer-use state get --machine <name> [--bundle-id <bundle-id>]
           computer-use action click --machine <name> (--x <x> --y <y> | --snapshot-id <id> --element-id <id>)
