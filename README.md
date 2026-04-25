@@ -66,7 +66,7 @@ forwarding computer-use commands to a session agent running inside the guest.
 - macOS images that cannot use `--publish` are handled by falling back to
   `container exec` transport for agent HTTP requests.
 - macOS images packaged without a default entrypoint are handled by retrying
-  sandbox creation with a keepalive init command (`tail -f /dev/null`), so
+  sandbox creation with a keepalive init command (`/usr/bin/tail -f /dev/null`), so
   fresh `machine start` no longer fails immediately with
   `command/entrypoint not specified for container process`.
 - The `container_exec` transport drains subprocess stdout/stderr while commands
@@ -95,9 +95,10 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 ## Remaining Work
 
-- The local `authorized` image has been repackaged and reloaded from the latest
-  session agent build, but a fresh host-side CLI smoke is still blocked by the
-  macOS runtime sidecar: `container start` repeatedly fails its internal
-  guest-agent `process.start` bootstrap for `__guest-agent-log__`, even though
-  the same cloned guest directory reaches the desktop and passes
-  `container macos start-vm` `probe` plus `sh true`.
+- The current `local/computer-use:authorized` image was traced to a stale
+  `/usr/local/bin/container-macos-guest-agent` (`c6e6d2...`). Updating the same
+  stopped clone to the OpenBox-bundled guest-agent (`fee5e8...`) makes
+  `container start` succeed: both `__guest-agent-log__` and the workload pass
+  `process.start` on the first attempt. The remaining image work is repackaging
+  `local/computer-use:authorized` from a clean authorized guest with that
+  guest-agent installed.

@@ -212,7 +212,7 @@ func containerCLIBridgeFallsBackToKeepaliveCommandWhenImageHasNoEntrypoint() thr
                 "--gui",
                 "--publish", "127.0.0.1:46000:7777/tcp",
                 "local/computer-use:authorized",
-                "tail", "-f", "/dev/null",
+                "/usr/bin/tail", "-f", "/dev/null",
             ],
             result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
         ),
@@ -263,7 +263,7 @@ func containerCLIBridgeFallsBackToKeepaliveCommandAfterDarwinPublishFallback() t
                 "--name", "demo",
                 "--gui",
                 "local/computer-use:authorized",
-                "tail", "-f", "/dev/null",
+                "/usr/bin/tail", "-f", "/dev/null",
             ],
             result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
         ),

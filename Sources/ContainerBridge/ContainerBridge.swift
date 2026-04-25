@@ -116,7 +116,7 @@ public protocol ContainerRuntimeBridging: Sendable {
 
 public struct ContainerCLIBridge: ContainerRuntimeBridging {
     private let runner: any ContainerCommandRunning
-    private static let defaultInitProcessArguments = ["tail", "-f", "/dev/null"]
+    private static let defaultInitProcessArguments = ["/usr/bin/tail", "-f", "/dev/null"]
 
     public init(runner: any ContainerCommandRunning = ProcessContainerCommandRunner()) {
         self.runner = runner

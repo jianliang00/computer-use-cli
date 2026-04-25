@@ -190,10 +190,20 @@ Latest run: 2026-04-25.
 - A rebuilt `local/computer-use:authorized` was packaged from the fresh IPSW
   source image and loaded successfully as `darwin/arm64`, size `20807105778`,
   manifest digest `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`.
-- Fresh host-side smoke now gets past image creation, but runtime startup is
-  still blocked by the macOS sidecar's internal guest-agent bootstrap:
-  `container start` repeatedly issues `process.start` for
-  `__guest-agent-log__` and receives `Connection reset by peer`.
-- The same cloned guest directory still reaches the desktop and passes
-  `container macos start-vm` `probe` plus `sh true`, so the remaining defect is
-  in runtime sidecar startup rather than the packaged authorized image.
+- Root cause for the fresh host-side smoke failure was isolated to the
+  guest-agent version baked into that image. The image contained
+  `/usr/local/bin/container-macos-guest-agent` with SHA-256
+  `c6e6d2d63d88f1abd09f41e09cb34ce4f44c434df2b1ffd44dd8c47d69c5e4fd`,
+  while the OpenBox runtime bundle contained
+  `fee5e8fb97bfa87d6ef23b79de195a1c72999db1ccba7673169f3d7f5174b50e`.
+- With the stale guest-agent, `container start` repeatedly issued
+  `process.start` for `__guest-agent-log__` and received
+  `Connection reset by peer`. The guest log showed the agent accepted the vsock
+  connection, received `exec`, then crashed in
+  `SpawnedProcessSession.flushOutputAndSendExit` with
+  `NSFileHandleOperationException` from `NSConcreteFileHandle.availableData`.
+- Replacing only `/usr/local/bin/container-macos-guest-agent` in the same stopped
+  clone with the OpenBox-bundled binary made `container start` succeed in 13s:
+  `__guest-agent-log__` and the workload both passed `process.start` on attempt
+  1. The remaining follow-up is to regenerate the local `authorized` image from
+  a clean authorized guest after installing the OpenBox-bundled guest-agent.

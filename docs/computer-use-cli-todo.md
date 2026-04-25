@@ -320,12 +320,16 @@
   - 为支持替换 app 后重新授权，新增 `POST /permissions/request` 和
     `computer-use permissions request --machine <name>`
   - 已重新从 IPSW 干净源 guest 生成并重新加载本地 `authorized image`
-  - fresh host-side smoke 暂时仍被 runtime sidecar 卡住：
-    `container start` 内部反复对 `__guest-agent-log__` 做 `process.start`，
-    返回 `Connection reset by peer`
-  - 同一份 runtime clone 目录用 `container macos start-vm` 仍可进入桌面，
-    并通过 `probe` 与 `sh true`，说明剩余缺口在 sidecar 启动链路，不在
-    `authorized image` 本身
+  - 已定位 fresh host-side smoke 的根因：`authorized image` 内固化的
+    `/usr/local/bin/container-macos-guest-agent` 是旧 hash `c6e6d2...`。
+    guest 日志显示 sidecar 发 `process.start` 后 agent 在
+    `SpawnedProcessSession.flushOutputAndSendExit` 中因
+    `NSFileHandleOperationException` 崩溃并重启
+  - 同一份 stopped clone 仅替换为 OpenBox bundle 内的新 guest-agent
+    `fee5e8...` 后，`container start` 在 13s 内成功，
+    `__guest-agent-log__` 和 workload 都在第 1 次 `process.start` 成功
+  - 剩余动作：从干净 authorized guest 重新安装 OpenBox bundle 的
+    guest-agent 后重新打包 `local/computer-use:authorized`
 
 - [x] T12 实现 `agent ping` 与 `agent doctor`
   目标：
