@@ -13,8 +13,10 @@ Latest run: 2026-04-25.
 - Verified generated launchd plists and app `Info.plist` with `plutil -lint`.
 - Used an existing local macOS VM image directory as an APFS clone under `/tmp/computer-use-guest-validate-image`.
 - Used `/tmp/computer-use-guest-validate-seed` as the VM shared seed directory.
+- Promoted the validated clone into a stable local base image directory:
+  `~/Library/Application Support/com.jianliang.OpenBox/macos-images/local-macos-base-latest`.
 
-The local `container image list` only contained Linux `ubuntu:24.04`; no local `local/macos-base:latest` OCI image was available. Because of that and limited free disk space, this run validated the installer and guest services directly against the cloned VM image instead of running `container build`.
+The local `container image list` only contained Linux `ubuntu:24.04`; no local `local/macos-base:latest` OCI image was available. Because of that and limited free disk space, this run validated the installer and guest services directly against the cloned VM image instead of running `container build`. The stable base directory is available locally, but it has not been packaged and loaded as the OCI tag because `container macos package` requires writing an intermediate OCI tar that currently needs more free disk space than is available.
 
 ## Results
 
@@ -50,6 +52,8 @@ The local `container image list` only contained Linux `ubuntu:24.04`; no local `
 - `GET /permissions` returned `HTTP 200` with Accessibility and Screen Recording both `false`.
 - `GET /apps` returned `HTTP 200` and listed running GUI apps including Terminal, Finder, Dock, and SystemUIServer.
 - `POST /state` returned `HTTP 403` with `permission_denied` and message `Missing permissions: accessibility, screenRecording`, which is the expected pre-authorization behavior.
+- The stable base directory booted successfully with `container macos start-vm --agent-probe`; the guest agent reported ready on vsock port `27000`.
+- The original `/tmp/computer-use-guest-validate-image` source clone and other temporary probe files were removed after the stable base directory was validated.
 
 ## Notes
 

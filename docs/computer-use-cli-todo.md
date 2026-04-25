@@ -53,10 +53,13 @@
   - `GET /apps` 能列出 Terminal、Finder、Dock 等运行中 app
   - `/state` 在未授权时返回 `403 permission_denied`
   - `/var/run/computer-use/bootstrap-status.json` 已刷新为 `bootstrapped: true`
+- 已基于验证后的临时镜像创建稳定本地基础镜像目录：
+  - `~/Library/Application Support/com.jianliang.OpenBox/macos-images/local-macos-base-latest`
+  - 该目录已通过 `container macos start-vm --agent-probe` 验证 guest agent 可连通
 
 尚未完成：
 
-- 本地 `container build` 的 darwin/arm64 base image tag 尚不可用，product image build 未验证
+- 本地 `container build` 的 darwin/arm64 OCI base image tag 尚不可用，product image build 未验证
 - auto-login 仍需在授权镜像准备阶段 seed `/etc/kcpassword`
 - authorized image 流程和完整 host-side macOS machine 生命周期验证
 
@@ -263,7 +266,8 @@
   当前状态：
   - 已有 Dockerfile、installer、LaunchDaemon、LaunchAgent 和 image context 准备脚本
   - 已在克隆 guest 中验证 live install、LaunchDaemon、LaunchAgent、HTTP health 和 bootstrap status
-  - 尚未通过 `container build` 生成 product image；当前本机缺少 darwin/arm64 macOS base image tag
+  - 已创建稳定本地基础镜像目录并验证 guest agent 可连通
+  - 尚未通过 `container build` 生成 product image；当前本机缺少 darwin/arm64 macOS OCI base image tag
   - auto-login 仍需在 authorized image 准备时 seed `/etc/kcpassword`
 
 - [ ] T11 产出 authorized image
