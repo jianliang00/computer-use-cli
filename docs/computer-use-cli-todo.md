@@ -307,8 +307,8 @@
 
   当前状态：
   - 已产出并加载 `local/computer-use:authorized`
-  - 平台 manifest digest:
-    `sha256:fce8effdfa3803e7317f02d954100020e1f353c054b40d63b0b8a0ffdbaff469`
+  - 当前平台 manifest digest:
+    `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`
   - 从 authorized image 新建 `cu-authorized-verify` guest 后验证通过：
     `autoLoginUser=admin`、`/dev/console=admin 501`、LaunchAgent 运行、
     `/health` 正常、`/permissions` 为 Accessibility 和 Screen Recording
@@ -319,9 +319,13 @@
     `/actions/type` 可写入 `Hello from codex`
   - 为支持替换 app 后重新授权，新增 `POST /permissions/request` 和
     `computer-use permissions request --machine <name>`
-  - 当前剩余宿主机收尾工作：从干净源 guest 重新生成并重新加载本地
-    `authorized image`；本轮一次 `No space left on device` 中断后生成的
-    host-side 归档不完整，不能作为最终工件
+  - 已重新从 IPSW 干净源 guest 生成并重新加载本地 `authorized image`
+  - fresh host-side smoke 暂时仍被 runtime sidecar 卡住：
+    `container start` 内部反复对 `__guest-agent-log__` 做 `process.start`，
+    返回 `Connection reset by peer`
+  - 同一份 runtime clone 目录用 `container macos start-vm` 仍可进入桌面，
+    并通过 `probe` 与 `sh true`，说明剩余缺口在 sidecar 启动链路，不在
+    `authorized image` 本身
 
 - [x] T12 实现 `agent ping` 与 `agent doctor`
   目标：

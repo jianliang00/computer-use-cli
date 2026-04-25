@@ -187,3 +187,13 @@ Latest run: 2026-04-25.
   `~/Library/Application Support/com.jianliang.OpenBox/container/`. Restarting
   with explicit `--app-root` and `--install-root` restored image loading during
   this run.
+- A rebuilt `local/computer-use:authorized` was packaged from the fresh IPSW
+  source image and loaded successfully as `darwin/arm64`, size `20807105778`,
+  manifest digest `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`.
+- Fresh host-side smoke now gets past image creation, but runtime startup is
+  still blocked by the macOS sidecar's internal guest-agent bootstrap:
+  `container start` repeatedly issues `process.start` for
+  `__guest-agent-log__` and receives `Connection reset by peer`.
+- The same cloned guest directory still reaches the desktop and passes
+  `container macos start-vm` `probe` plus `sh true`, so the remaining defect is
+  in runtime sidecar startup rather than the packaged authorized image.

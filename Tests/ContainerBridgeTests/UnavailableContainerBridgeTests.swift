@@ -195,6 +195,101 @@ func containerCLIBridgeFallsBackWhenDarwinPublishIsUnsupported() throws {
 }
 
 @Test
+func containerCLIBridgeFallsBackToKeepaliveCommandWhenImageHasNoEntrypoint() throws {
+    let runner = QueueContainerCommandRunner(steps: [
+        .failure(
+            arguments: ["create", "--name", "demo", "--gui", "--publish", "127.0.0.1:46000:7777/tcp", "local/computer-use:authorized"],
+            error: ContainerBridgeError.commandFailed(
+                command: ["container", "create"],
+                exitCode: 1,
+                stderr: #"Error: invalidArgument: "command/entrypoint not specified for container process""#
+            )
+        ),
+        .success(
+            arguments: [
+                "create",
+                "--name", "demo",
+                "--gui",
+                "--publish", "127.0.0.1:46000:7777/tcp",
+                "local/computer-use:authorized",
+                "tail", "-f", "/dev/null",
+            ],
+            result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
+        ),
+        .success(
+            arguments: ["inspect", "demo"],
+            result: CommandExecutionResult(
+                exitCode: 0,
+                stdout: #"[{"status":"stopped","configuration":{"id":"demo","image":{"reference":"local/computer-use:authorized"},"publishedPorts":[{"containerPort":7777,"hostPort":46000,"hostAddress":"127.0.0.1","proto":"tcp","count":1}]}}]"#,
+                stderr: ""
+            )
+        ),
+    ])
+    let bridge = ContainerCLIBridge(runner: runner)
+
+    let details = try bridge.createSandbox(configuration: SandboxConfiguration(
+        name: "demo",
+        imageReference: "local/computer-use:authorized",
+        publishedHostPort: 46000
+    ))
+
+    #expect(details.publishedHostPort == 46000)
+    #expect(details.agentTransport == .publishedTCP)
+    #expect(runner.isExhausted)
+}
+
+@Test
+func containerCLIBridgeFallsBackToKeepaliveCommandAfterDarwinPublishFallback() throws {
+    let runner = QueueContainerCommandRunner(steps: [
+        .failure(
+            arguments: ["create", "--name", "demo", "--gui", "--publish", "127.0.0.1:46000:7777/tcp", "local/computer-use:authorized"],
+            error: ContainerBridgeError.commandFailed(
+                command: ["container", "create"],
+                exitCode: 1,
+                stderr: #"unsupported: "--publish is not supported for --os darwin""#
+            )
+        ),
+        .failure(
+            arguments: ["create", "--name", "demo", "--gui", "local/computer-use:authorized"],
+            error: ContainerBridgeError.commandFailed(
+                command: ["container", "create"],
+                exitCode: 1,
+                stderr: #"Error: invalidArgument: "command/entrypoint not specified for container process""#
+            )
+        ),
+        .success(
+            arguments: [
+                "create",
+                "--name", "demo",
+                "--gui",
+                "local/computer-use:authorized",
+                "tail", "-f", "/dev/null",
+            ],
+            result: CommandExecutionResult(exitCode: 0, stdout: "demo", stderr: "")
+        ),
+        .success(
+            arguments: ["inspect", "demo"],
+            result: CommandExecutionResult(
+                exitCode: 0,
+                stdout: #"[{"status":"stopped","configuration":{"id":"demo","platform":{"os":"darwin","architecture":"arm64"},"image":{"reference":"local/computer-use:authorized"},"publishedPorts":[]}}]"#,
+                stderr: ""
+            )
+        ),
+    ])
+    let bridge = ContainerCLIBridge(runner: runner)
+
+    let details = try bridge.createSandbox(configuration: SandboxConfiguration(
+        name: "demo",
+        imageReference: "local/computer-use:authorized",
+        publishedHostPort: 46000
+    ))
+
+    #expect(details.publishedHostPort == nil)
+    #expect(details.agentTransport == .containerExec)
+    #expect(runner.isExhausted)
+}
+
+@Test
 func processContainerCommandRunnerDrainsLargeStdoutWhileProcessRuns() throws {
     let runner = ProcessContainerCommandRunner(executableURL: URL(fileURLWithPath: "/usr/bin/perl"))
     let result = try runner.run(arguments: ["-e", #"print "x" x 2097152"#])

@@ -30,6 +30,18 @@ public struct SandboxConfiguration: Equatable, Sendable {
     var publishSpec: String {
         "\(hostAddress):\(publishedHostPort):\(guestAgentPort)/tcp"
     }
+
+    func with(initProcessArguments: [String]) -> SandboxConfiguration {
+        SandboxConfiguration(
+            name: name,
+            imageReference: imageReference,
+            publishedHostPort: publishedHostPort,
+            guestAgentPort: guestAgentPort,
+            hostAddress: hostAddress,
+            guiEnabled: guiEnabled,
+            initProcessArguments: initProcessArguments
+        )
+    }
 }
 
 public struct SandboxDetails: Equatable, Sendable {
@@ -104,25 +116,49 @@ public protocol ContainerRuntimeBridging: Sendable {
 
 public struct ContainerCLIBridge: ContainerRuntimeBridging {
     private let runner: any ContainerCommandRunning
+    private static let defaultInitProcessArguments = ["tail", "-f", "/dev/null"]
 
     public init(runner: any ContainerCommandRunning = ProcessContainerCommandRunner()) {
         self.runner = runner
     }
 
     public func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
-        let arguments = createArguments(configuration: configuration, includePublish: true)
+        try createSandbox(configuration: configuration, includePublish: true)
+    }
+
+    private func createSandbox(
+        configuration: SandboxConfiguration,
+        includePublish: Bool
+    ) throws -> SandboxDetails {
+        let arguments = createArguments(
+            configuration: configuration,
+            includePublish: includePublish
+        )
 
         do {
             let result = try runner.run(arguments: arguments)
             let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
             return try inspectSandbox(id: sandboxID)
-        } catch let error as ContainerBridgeError
-            where error.isDarwinPublishUnsupported
-        {
-            let fallbackArguments = createArguments(configuration: configuration, includePublish: false)
-            let result = try runner.run(arguments: fallbackArguments)
-            let sandboxID = result.stdout.isEmpty ? configuration.name : result.stdout
-            return try inspectSandbox(id: sandboxID)
+        } catch let error as ContainerBridgeError where error.isDarwinPublishUnsupported {
+            guard includePublish else {
+                throw error
+            }
+
+            return try createSandbox(
+                configuration: configuration,
+                includePublish: false
+            )
+        } catch let error as ContainerBridgeError where error.isMissingEntrypoint {
+            guard configuration.initProcessArguments.isEmpty else {
+                throw error
+            }
+
+            return try createSandbox(
+                configuration: configuration.with(
+                    initProcessArguments: Self.defaultInitProcessArguments
+                ),
+                includePublish: includePublish
+            )
         }
     }
 
@@ -398,6 +434,14 @@ private extension ContainerBridgeError {
         }
 
         return stderr.contains("--publish is not supported for --os darwin")
+    }
+
+    var isMissingEntrypoint: Bool {
+        guard case let .commandFailed(_, _, stderr) = self else {
+            return false
+        }
+
+        return stderr.contains("command/entrypoint not specified for container process")
     }
 }
 
