@@ -22,13 +22,8 @@ cu() {
   "$COMPUTER_USE_BIN" "$@"
 }
 
-cu apps list --machine "$MACHINE" >"$WORK_DIR/apps.json"
-cu state get --machine "$MACHINE" --app TextEdit >"$WORK_DIR/textedit-launch.json"
-cu action key --machine "$MACHINE" --app TextEdit --key cmd+n >"$WORK_DIR/textedit-new-document.json"
-sleep 1
-cu state get --machine "$MACHINE" --app TextEdit >"$WORK_DIR/textedit-before.json"
-
-python3 - "$WORK_DIR/textedit-before.json" >"$WORK_DIR/textedit-indexes.env" <<'PY'
+extract_textedit_indexes() {
+  python3 - "$1" >"$2" <<'PY'
 import json
 import sys
 
@@ -58,12 +53,55 @@ print(f"TEXT_INDEX={int(text_node['index'])}")
 if window_node is not None:
     print(f"WINDOW_INDEX={int(window_node['index'])}")
 PY
+}
 
+extract_finder_target() {
+  python3 - "$1" >"$2" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as file:
+    state = json.load(file)
+
+target = next(
+    (
+        node
+        for node in state.get("ax_tree", {}).get("nodes", [])
+        if node.get("bounds") and node.get("index") is not None
+    ),
+    None,
+)
+if target is None:
+    raise SystemExit("no indexed Finder AX node with bounds found")
+
+bounds = target["bounds"]
+x = bounds["x"] + min(bounds["width"] / 2, 20)
+y = bounds["y"] + min(bounds["height"] / 2, 20)
+print(f"FINDER_INDEX={int(target['index'])}")
+print(f"FINDER_X={x}")
+print(f"FINDER_Y={y}")
+print(f"FINDER_TO_X={x + 10}")
+print(f"FINDER_TO_Y={y + 10}")
+PY
+}
+
+cu apps list --machine "$MACHINE" >"$WORK_DIR/apps.json"
+cu state get --machine "$MACHINE" --app TextEdit >"$WORK_DIR/textedit-launch.json"
+cu action key --machine "$MACHINE" --app TextEdit --key cmd+n >"$WORK_DIR/textedit-new-document.json"
+sleep 1
+cu state get --machine "$MACHINE" --app TextEdit >"$WORK_DIR/textedit-before.json"
+extract_textedit_indexes "$WORK_DIR/textedit-before.json" "$WORK_DIR/textedit-indexes.env"
 . "$WORK_DIR/textedit-indexes.env"
 
 cu action click --machine "$MACHINE" --app TextEdit --element-index "$TEXT_INDEX" >"$WORK_DIR/textedit-click.json"
 cu action type --machine "$MACHINE" --app TextEdit --text "$MARKER" >"$WORK_DIR/textedit-type.json"
 cu action key --machine "$MACHINE" --app TextEdit --key cmd+a >"$WORK_DIR/textedit-key.json"
+
+unset TEXT_INDEX WINDOW_INDEX
+cu state get --machine "$MACHINE" --app TextEdit >"$WORK_DIR/textedit-before-set-value.json"
+extract_textedit_indexes "$WORK_DIR/textedit-before-set-value.json" "$WORK_DIR/textedit-indexes.env"
+. "$WORK_DIR/textedit-indexes.env"
+
 cu action set-value \
   --machine "$MACHINE" \
   --app TextEdit \
@@ -113,38 +151,15 @@ if not summary["textedit_ax_tree_text"]:
 PY
 
 cu state get --machine "$MACHINE" --app Finder >"$WORK_DIR/finder-state.json"
-
-python3 - "$WORK_DIR/finder-state.json" >"$WORK_DIR/finder-target.env" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1]) as file:
-    state = json.load(file)
-
-target = next(
-    (
-        node
-        for node in state.get("ax_tree", {}).get("nodes", [])
-        if node.get("bounds") and node.get("index") is not None
-    ),
-    None,
-)
-if target is None:
-    raise SystemExit("no indexed Finder AX node with bounds found")
-
-bounds = target["bounds"]
-x = bounds["x"] + min(bounds["width"] / 2, 20)
-y = bounds["y"] + min(bounds["height"] / 2, 20)
-print(f"FINDER_INDEX={int(target['index'])}")
-print(f"FINDER_X={x}")
-print(f"FINDER_Y={y}")
-print(f"FINDER_TO_X={x + 10}")
-print(f"FINDER_TO_Y={y + 10}")
-PY
-
+extract_finder_target "$WORK_DIR/finder-state.json" "$WORK_DIR/finder-target.env"
 . "$WORK_DIR/finder-target.env"
 
 cu action click --machine "$MACHINE" --app Finder --x "$FINDER_X" --y "$FINDER_Y" >"$WORK_DIR/finder-click.json"
+
+cu state get --machine "$MACHINE" --app Finder >"$WORK_DIR/finder-scroll-state.json"
+extract_finder_target "$WORK_DIR/finder-scroll-state.json" "$WORK_DIR/finder-target.env"
+. "$WORK_DIR/finder-target.env"
+
 cu action scroll \
   --machine "$MACHINE" \
   --app Finder \
