@@ -25,17 +25,64 @@ public struct Rect: Codable, Sendable, Equatable {
 }
 
 public struct SnapshotElementReference: Codable, Sendable, Equatable {
-    public var snapshotID: String
-    public var elementID: String
+    public var snapshotID: String?
+    public var elementID: String?
+    public var elementIndex: Int?
 
     public init(snapshotID: String, elementID: String) {
         self.snapshotID = snapshotID
         self.elementID = elementID
+        self.elementIndex = nil
+    }
+
+    public init(snapshotID: String? = nil, elementIndex: Int) {
+        self.snapshotID = snapshotID
+        self.elementID = nil
+        self.elementIndex = elementIndex
+    }
+
+    public init(snapshotID: String?, elementID: String?, elementIndex: Int?) throws {
+        if (elementID == nil) == (elementIndex == nil) {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: [],
+                    debugDescription: "Element reference must include exactly one of element_id or element_index."
+                )
+            )
+        }
+
+        self.snapshotID = snapshotID
+        self.elementID = elementID
+        self.elementIndex = elementIndex
     }
 
     private enum CodingKeys: String, CodingKey {
         case snapshotID = "snapshot_id"
         case elementID = "element_id"
+        case elementIndex = "element_index"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        snapshotID = try container.decodeIfPresent(String.self, forKey: .snapshotID)
+        elementID = try container.decodeIfPresent(String.self, forKey: .elementID)
+        elementIndex = try container.decodeIfPresent(Int.self, forKey: .elementIndex)
+
+        if (elementID == nil) == (elementIndex == nil) {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Element reference must include exactly one of element_id or element_index."
+                )
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(snapshotID, forKey: .snapshotID)
+        try container.encodeIfPresent(elementID, forKey: .elementID)
+        try container.encodeIfPresent(elementIndex, forKey: .elementIndex)
     }
 }
 
@@ -62,12 +109,26 @@ public struct RunningApplication: Codable, Sendable, Equatable {
     public var name: String
     public var pid: Int
     public var isFrontmost: Bool
+    public var isRunning: Bool?
+    public var lastUsed: String?
+    public var uses: Int?
 
-    public init(bundleID: String, name: String, pid: Int, isFrontmost: Bool) {
+    public init(
+        bundleID: String,
+        name: String,
+        pid: Int,
+        isFrontmost: Bool,
+        isRunning: Bool? = nil,
+        lastUsed: String? = nil,
+        uses: Int? = nil
+    ) {
         self.bundleID = bundleID
         self.name = name
         self.pid = pid
         self.isFrontmost = isFrontmost
+        self.isRunning = isRunning
+        self.lastUsed = lastUsed
+        self.uses = uses
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -75,6 +136,9 @@ public struct RunningApplication: Codable, Sendable, Equatable {
         case name
         case pid
         case isFrontmost = "is_frontmost"
+        case isRunning = "is_running"
+        case lastUsed = "last_used"
+        case uses
     }
 }
 
@@ -119,6 +183,7 @@ public struct AXTree: Codable, Sendable, Equatable {
 }
 
 public struct AXNode: Codable, Sendable, Equatable {
+    public var index: Int?
     public var id: String
     public var role: String
     public var title: String?
@@ -129,6 +194,7 @@ public struct AXNode: Codable, Sendable, Equatable {
     public var actions: [String]
 
     public init(
+        index: Int? = nil,
         id: String,
         role: String,
         title: String? = nil,
@@ -138,6 +204,7 @@ public struct AXNode: Codable, Sendable, Equatable {
         children: [String] = [],
         actions: [String] = []
     ) {
+        self.index = index
         self.id = id
         self.role = role
         self.title = title

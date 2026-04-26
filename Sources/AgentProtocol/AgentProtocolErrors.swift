@@ -25,6 +25,7 @@ public struct AgentErrorCode: RawRepresentable, Hashable, Codable, Sendable, Exp
     public static let snapshotExpired: Self = "snapshot_expired"
     public static let invalidRequest: Self = "invalid_request"
     public static let appNotFound: Self = "app_not_found"
+    public static let appAmbiguous: Self = "app_ambiguous"
     public static let elementNotFound: Self = "element_not_found"
     public static let unsupportedAction: Self = "unsupported_action"
 }

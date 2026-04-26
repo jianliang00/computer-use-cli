@@ -58,6 +58,8 @@ public final class SessionAgentHTTPRouter: Sendable {
                 return try await requestPermissions()
             case (.get, "/apps"):
                 return try await apps()
+            case (.post, "/apps/activate"):
+                return try await activateApp(request)
             case (.post, "/state"):
                 try await requireAutomationPermissions()
                 return try await state(request)
@@ -91,6 +93,8 @@ public final class SessionAgentHTTPRouter: Sendable {
             }
         } catch let routeError as SessionAgentHTTPRouteError {
             return routeError.response()
+        } catch let activationError as ApplicationActivationError {
+            return appActivationError(activationError)
         } catch let cacheError as SnapshotCacheError {
             return snapshotCacheError(cacheError)
         } catch let coreError as ComputerUseAgentCoreError {
@@ -126,46 +130,60 @@ public final class SessionAgentHTTPRouter: Sendable {
                     bundleID: application.bundleIdentifier,
                     name: application.name,
                     pid: Int(application.processIdentifier),
-                    isFrontmost: application.isFrontmost
+                    isFrontmost: application.isFrontmost,
+                    isRunning: application.isRunning,
+                    lastUsed: application.lastUsed.map(formatDate),
+                    uses: application.useCount
                 )
             }
         ))
     }
 
+    private func activateApp(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
+        let activationRequest = try decode(AppActivationRequest.self, from: request)
+        let application = try await agent.activateApplication(target: activationRequest.app)
+        return try json(AppActivationResponse(app: appDescriptor(application)))
+    }
+
     private func state(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let stateRequest = try decode(StateRequest.self, from: request)
-        let snapshot = try await agent.captureState(bundleIdentifier: stateRequest.bundleID)
+        let bundleID = try await stateTargetBundleID(stateRequest)
+        let snapshot = try await agent.captureState(bundleIdentifier: bundleID)
         let app = selectedApplication(
             applications: snapshot.applications,
-            bundleID: stateRequest.bundleID
+            bundleID: bundleID
         )
         guard let app else {
             throw SessionAgentHTTPRouteError.agent(
                 statusCode: 404,
                 code: .appNotFound,
-                message: stateRequest.bundleID.map { "Application \($0) was not found" }
+                message: (stateRequest.app ?? stateRequest.bundleID).map { "Application \($0) was not found" }
                     ?? "No running application is available"
             )
         }
 
+        let axNodes = flatten(snapshot.accessibilityRoot)
+        let focusedElement = snapshot.focusedElementID.flatMap { focusedElementID in
+            axNodes.first { $0.id == focusedElementID }
+        }
+
         return try json(StateResponse(
             snapshotID: snapshot.snapshotID,
-            app: ApplicationDescriptor(
-                bundleID: app.bundleIdentifier,
-                name: app.name,
-                pid: Int(app.processIdentifier)
-            ),
+            app: appDescriptor(app),
             window: nil,
             screenshot: ScreenshotPayload(
                 mimeType: "image/png",
                 base64: Data(snapshot.screenshot.bytes).base64EncodedString()
             ),
-            axTree: AXTree(rootID: snapshot.accessibilityRoot.id, nodes: flatten(snapshot.accessibilityRoot))
+            axTree: AXTree(rootID: snapshot.accessibilityRoot.id, nodes: axNodes),
+            axTreeText: readableAXTree(root: snapshot.accessibilityRoot),
+            focusedElement: focusedElement
         ))
     }
 
     private func click(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.ClickActionRequest.self, from: request)
+        let appBundleIdentifier = try await activateAppIfRequested(action.app)
         switch action.target {
         case let .coordinates(point):
             _ = try await agent.click(ComputerUseAgentCore.ClickActionRequest(
@@ -175,30 +193,50 @@ public final class SessionAgentHTTPRouter: Sendable {
             ))
             return try json(ActionResponse())
         case let .element(reference):
-            _ = try await agent.click(ComputerUseAgentCore.ClickActionRequest(
-                snapshotID: reference.snapshotID,
-                elementID: reference.elementID,
-                button: ComputerUseAgentCore.MouseButton(rawValue: action.button.rawValue) ?? .left,
-                clickCount: action.clickCount
-            ))
+            let button = ComputerUseAgentCore.MouseButton(rawValue: action.button.rawValue) ?? .left
+            let request: ComputerUseAgentCore.ClickActionRequest
+            if let elementIndex = reference.elementIndex {
+                request = ComputerUseAgentCore.ClickActionRequest(
+                    snapshotID: reference.snapshotID,
+                    elementIndex: elementIndex,
+                    button: button,
+                    clickCount: action.clickCount,
+                    appBundleIdentifier: appBundleIdentifier
+                )
+            } else {
+                request = ComputerUseAgentCore.ClickActionRequest(
+                    snapshotID: try requiredSnapshotID(reference),
+                    elementID: try requiredElementID(reference),
+                    button: button,
+                    clickCount: action.clickCount,
+                    appBundleIdentifier: appBundleIdentifier
+                )
+            }
+            _ = try await agent.click(request)
             return try json(ActionResponse())
         }
     }
 
     private func type(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.TypeActionRequest.self, from: request)
+        _ = try await activateAppIfRequested(action.app)
         _ = try await agent.type(ComputerUseAgentCore.TypeActionRequest(text: action.text))
         return try json(ActionResponse())
     }
 
     private func key(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.KeyActionRequest.self, from: request)
-        _ = try await agent.key(ComputerUseAgentCore.KeyActionRequest(key: action.key))
+        _ = try await activateAppIfRequested(action.app)
+        _ = try await agent.key(ComputerUseAgentCore.KeyActionRequest(
+            key: action.key,
+            modifiers: action.modifiers.map(coreModifier)
+        ))
         return try json(ActionResponse())
     }
 
     private func drag(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.DragActionRequest.self, from: request)
+        _ = try await activateAppIfRequested(action.app)
         _ = try await agent.drag(ComputerUseAgentCore.DragActionRequest(
             start: ComputerUseAgentCore.Point(x: action.from.x, y: action.from.y),
             end: ComputerUseAgentCore.Point(x: action.to.x, y: action.to.y)
@@ -208,30 +246,37 @@ public final class SessionAgentHTTPRouter: Sendable {
 
     private func scroll(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.ScrollActionRequest.self, from: request)
+        let appBundleIdentifier = try await activateAppIfRequested(action.app)
         let delta = scrollDelta(direction: action.direction, pages: action.pages)
         _ = try await agent.scroll(ComputerUseAgentCore.ScrollActionRequest(
             deltaX: delta.x,
-            deltaY: delta.y
+            deltaY: delta.y,
+            snapshotID: action.target.snapshotID,
+            elementID: action.target.elementID,
+            elementIndex: action.target.elementIndex,
+            appBundleIdentifier: appBundleIdentifier
         ))
         return try json(ActionResponse())
     }
 
     private func setValue(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.SetValueActionRequest.self, from: request)
-        _ = try await agent.setValue(ComputerUseAgentCore.SetValueActionRequest(
-            elementID: action.target.elementID,
+        let appBundleIdentifier = try await activateAppIfRequested(action.app)
+        _ = try await agent.setValue(try coreSetValueRequest(
+            reference: action.target,
             value: action.value,
-            snapshotID: action.target.snapshotID
+            appBundleIdentifier: appBundleIdentifier
         ))
         return try json(ActionResponse())
     }
 
     private func perform(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
         let action = try decode(AgentProtocol.ElementActionRequest.self, from: request)
-        _ = try await agent.perform(ComputerUseAgentCore.ElementActionRequest(
-            elementID: action.target.elementID,
-            actionName: action.name,
-            snapshotID: action.target.snapshotID
+        let appBundleIdentifier = try await activateAppIfRequested(action.app)
+        _ = try await agent.perform(try coreElementActionRequest(
+            reference: action.target,
+            name: action.name,
+            appBundleIdentifier: appBundleIdentifier
         ))
         return try json(ActionResponse())
     }
@@ -259,18 +304,54 @@ public final class SessionAgentHTTPRouter: Sendable {
         return applications.first { $0.isFrontmost } ?? applications.first
     }
 
+    private func stateTargetBundleID(_ request: StateRequest) async throws -> String? {
+        if request.app != nil && request.bundleID != nil {
+            throw SessionAgentHTTPRouteError.agent(
+                statusCode: 400,
+                code: .invalidRequest,
+                message: "state get accepts either app or bundle_id, not both"
+            )
+        }
+
+        if let app = request.app {
+            return try await agent.activateApplication(target: app).bundleIdentifier
+        }
+
+        return request.bundleID
+    }
+
+    private func activateAppIfRequested(_ app: String?) async throws -> String? {
+        guard let app else {
+            return nil
+        }
+
+        return try await agent.activateApplication(target: app).bundleIdentifier
+    }
+
+    private func appDescriptor(_ application: ComputerUseAgentCore.RunningApplication) -> ApplicationDescriptor {
+        ApplicationDescriptor(
+            bundleID: application.bundleIdentifier,
+            name: application.name,
+            pid: Int(application.processIdentifier)
+        )
+    }
+
     private func flatten(_ root: AccessibilityNode) -> [AXNode] {
         var nodes: [AXNode] = []
+        var fallbackIndex = 0
 
         func walk(_ node: AccessibilityNode) {
+            let index = node.index ?? fallbackIndex
+            fallbackIndex += 1
             nodes.append(AXNode(
+                index: index,
                 id: node.id,
                 role: node.role,
                 title: node.title,
                 value: node.value,
                 bounds: node.frame.map(protocolRect),
                 children: node.children.map(\.id),
-                actions: []
+                actions: node.actions
             ))
 
             node.children.forEach(walk)
@@ -278,6 +359,29 @@ public final class SessionAgentHTTPRouter: Sendable {
 
         walk(root)
         return nodes
+    }
+
+    private func readableAXTree(root: AccessibilityNode) -> String {
+        var lines: [String] = []
+
+        func walk(_ node: AccessibilityNode, depth: Int) {
+            let index = node.index.map(String.init) ?? "-"
+            var parts = ["\(String(repeating: "  ", count: depth))\(index) \(node.role)"]
+            if let title = node.title, title.isEmpty == false {
+                parts.append(title)
+            }
+            if let value = node.value, value.isEmpty == false {
+                parts.append(value)
+            }
+            if node.actions.isEmpty == false {
+                parts.append("Actions: \(node.actions.joined(separator: ", "))")
+            }
+            lines.append(parts.joined(separator: " "))
+            node.children.forEach { walk($0, depth: depth + 1) }
+        }
+
+        walk(root, depth: 0)
+        return lines.joined(separator: "\n")
     }
 
     private func protocolRect(_ rect: ComputerUseAgentCore.Rect) -> AgentProtocol.Rect {
@@ -289,8 +393,8 @@ public final class SessionAgentHTTPRouter: Sendable {
         )
     }
 
-    private func scrollDelta(direction: ScrollDirection, pages: Int) -> (x: Double, y: Double) {
-        let amount = Double(max(pages, 1)) * 800
+    private func scrollDelta(direction: ScrollDirection, pages: Double) -> (x: Double, y: Double) {
+        let amount = max(pages, 0.1) * 800
 
         switch direction {
         case .up:
@@ -355,9 +459,142 @@ public final class SessionAgentHTTPRouter: Sendable {
                     code: .elementNotFound,
                     message: "Element \(elementID) was not found in snapshot \(snapshotID)"
                 )
+            case let .elementIndexNotFound(snapshotID, elementIndex):
+                return try self.error(
+                    statusCode: 404,
+                    code: .elementNotFound,
+                    message: "Element index \(elementIndex) was not found in snapshot \(snapshotID)"
+                )
+            case let .snapshotAppMismatch(snapshotID, expectedBundleID, actualBundleID):
+                return try self.error(
+                    statusCode: 409,
+                    code: .elementNotFound,
+                    message: "Snapshot \(snapshotID) belongs to \(actualBundleID), not \(expectedBundleID)"
+                )
             }
         } catch {
             return SessionAgentHTTPResponse(statusCode: 500)
+        }
+    }
+
+    private func appActivationError(_ error: ApplicationActivationError) -> SessionAgentHTTPResponse {
+        do {
+            switch error {
+            case let .appAmbiguous(target, candidates):
+                let candidateList = candidates
+                    .map { "\($0.name) (\($0.bundleIdentifier))" }
+                    .joined(separator: ", ")
+                return try self.error(
+                    statusCode: 409,
+                    code: .appAmbiguous,
+                    message: "Application \(target) matched multiple candidates: \(candidateList)"
+                )
+            case let .appNotFound(target):
+                return try self.error(
+                    statusCode: 404,
+                    code: .appNotFound,
+                    message: "Application \(target) was not found"
+                )
+            case let .appLaunchFailed(target):
+                return try self.error(
+                    statusCode: 501,
+                    code: .unsupportedAction,
+                    message: "Application \(target) could not be launched"
+                )
+            case let .appWindowUnavailable(target):
+                return try self.error(
+                    statusCode: 504,
+                    code: .appNotFound,
+                    message: "Application \(target) did not expose a key window"
+                )
+            }
+        } catch {
+            return SessionAgentHTTPResponse(statusCode: 500)
+        }
+    }
+
+    private func requiredElementID(_ reference: SnapshotElementReference) throws -> String {
+        guard let elementID = reference.elementID else {
+            throw SessionAgentHTTPRouteError.agent(
+                statusCode: 400,
+                code: .invalidRequest,
+                message: "element_id is required"
+            )
+        }
+
+        return elementID
+    }
+
+    private func requiredSnapshotID(_ reference: SnapshotElementReference) throws -> String {
+        guard let snapshotID = reference.snapshotID else {
+            throw SessionAgentHTTPRouteError.agent(
+                statusCode: 400,
+                code: .invalidRequest,
+                message: "snapshot_id is required with element_id"
+            )
+        }
+
+        return snapshotID
+    }
+
+    private func coreSetValueRequest(
+        reference: SnapshotElementReference,
+        value: String,
+        appBundleIdentifier: String?
+    ) throws -> ComputerUseAgentCore.SetValueActionRequest {
+        if let elementIndex = reference.elementIndex {
+            return ComputerUseAgentCore.SetValueActionRequest(
+                elementIndex: elementIndex,
+                value: value,
+                snapshotID: reference.snapshotID,
+                appBundleIdentifier: appBundleIdentifier
+            )
+        }
+
+        return ComputerUseAgentCore.SetValueActionRequest(
+            elementID: try requiredElementID(reference),
+            value: value,
+            snapshotID: try requiredSnapshotID(reference),
+            appBundleIdentifier: appBundleIdentifier
+        )
+    }
+
+    private func coreElementActionRequest(
+        reference: SnapshotElementReference,
+        name: String,
+        appBundleIdentifier: String?
+    ) throws -> ComputerUseAgentCore.ElementActionRequest {
+        if let elementIndex = reference.elementIndex {
+            return ComputerUseAgentCore.ElementActionRequest(
+                elementIndex: elementIndex,
+                actionName: name,
+                snapshotID: reference.snapshotID,
+                appBundleIdentifier: appBundleIdentifier
+            )
+        }
+
+        return ComputerUseAgentCore.ElementActionRequest(
+            elementID: try requiredElementID(reference),
+            actionName: name,
+            snapshotID: try requiredSnapshotID(reference),
+            appBundleIdentifier: appBundleIdentifier
+        )
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    private func coreModifier(_ modifier: AgentProtocol.KeyModifier) -> ComputerUseAgentCore.KeyModifier {
+        switch modifier {
+        case .command:
+            .command
+        case .shift:
+            .shift
+        case .option:
+            .option
+        case .control:
+            .control
         }
     }
 

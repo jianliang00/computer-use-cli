@@ -218,7 +218,10 @@ public struct CommandLineTool {
         case "get":
             let name = try flags.requiredValue(for: "--machine")
             let baseURL = try agentBaseURL(forMachine: name)
-            let request = StateRequest(bundleID: flags.optionalValue(for: "--bundle-id"))
+            let request = StateRequest(
+                bundleID: flags.optionalValue(for: "--bundle-id"),
+                app: flags.optionalValue(for: "--app")
+            )
             return try JSONOutput.render(agentClient.state(baseURL: baseURL, request: request))
         default:
             throw CLIError.unknownSubcommand("state", subcommand)
@@ -233,6 +236,7 @@ public struct CommandLineTool {
         let flags = try FlagParser(arguments: Array(arguments.dropFirst())).parse()
         let name = try flags.requiredValue(for: "--machine")
         let baseURL = try agentBaseURL(forMachine: name)
+        let app = flags.optionalValue(for: "--app")
 
         switch subcommand {
         case "click":
@@ -241,18 +245,19 @@ public struct CommandLineTool {
                 request: ClickActionRequest(
                     target: try clickTarget(from: flags),
                     button: try mouseButton(from: flags.optionalValue(for: "--button")),
-                    clickCount: try flags.optionalIntValue(for: "--click-count") ?? 1
+                    clickCount: try flags.optionalIntValue(for: "--click-count") ?? 1,
+                    app: app
                 )
             ))
         case "type":
             return try JSONOutput.render(agentClient.type(
                 baseURL: baseURL,
-                request: TypeActionRequest(text: try textValue(from: flags))
+                request: TypeActionRequest(text: try textValue(from: flags), app: app)
             ))
         case "key":
             return try JSONOutput.render(agentClient.key(
                 baseURL: baseURL,
-                request: KeyActionRequest(key: try flags.requiredValue(for: "--key"))
+                request: try keyRequest(from: flags, app: app)
             ))
         case "drag":
             return try JSONOutput.render(agentClient.drag(
@@ -265,7 +270,8 @@ public struct CommandLineTool {
                     to: Point(
                         x: try flags.requiredDoubleValue(for: "--to-x"),
                         y: try flags.requiredDoubleValue(for: "--to-y")
-                    )
+                    ),
+                    app: app
                 )
             ))
         case "scroll":
@@ -274,7 +280,8 @@ public struct CommandLineTool {
                 request: ScrollActionRequest(
                     target: try elementReference(from: flags),
                     direction: try scrollDirection(from: flags.requiredValue(for: "--direction")),
-                    pages: try flags.optionalIntValue(for: "--pages") ?? 1
+                    pages: try flags.optionalDoubleValue(for: "--pages") ?? 1,
+                    app: app
                 )
             ))
         case "set-value":
@@ -282,7 +289,8 @@ public struct CommandLineTool {
                 baseURL: baseURL,
                 request: SetValueActionRequest(
                     target: try elementReference(from: flags),
-                    value: try flags.requiredValue(for: "--value")
+                    value: try flags.requiredValue(for: "--value"),
+                    app: app
                 )
             ))
         case "action":
@@ -290,7 +298,8 @@ public struct CommandLineTool {
                 baseURL: baseURL,
                 request: ElementActionRequest(
                     target: try elementReference(from: flags),
-                    name: try flags.requiredValue(for: "--name")
+                    name: try flags.requiredValue(for: "--name"),
+                    app: app
                 )
             ))
         default:
@@ -359,7 +368,9 @@ public struct CommandLineTool {
 
     private func clickTarget(from flags: ParsedFlags) throws -> ClickActionRequest.Target {
         let hasCoordinates = flags.hasValue(for: "--x") || flags.hasValue(for: "--y")
-        let hasElement = flags.hasValue(for: "--snapshot-id") || flags.hasValue(for: "--element-id")
+        let hasElement = flags.hasValue(for: "--snapshot-id")
+            || flags.hasValue(for: "--element-id")
+            || flags.hasValue(for: "--element-index")
 
         switch (hasCoordinates, hasElement) {
         case (true, false):
@@ -371,13 +382,20 @@ public struct CommandLineTool {
             return .element(try elementReference(from: flags))
         default:
             throw CLIError.invalidFlagCombination(
-                "click requires either --x/--y or --snapshot-id/--element-id"
+                "click requires either --x/--y, --snapshot-id/--element-id, or --element-index"
             )
         }
     }
 
     private func elementReference(from flags: ParsedFlags) throws -> SnapshotElementReference {
-        SnapshotElementReference(
+        if let elementIndex = try flags.optionalIntValue(for: "--element-index") {
+            return SnapshotElementReference(
+                snapshotID: flags.optionalValue(for: "--snapshot-id"),
+                elementIndex: elementIndex
+            )
+        }
+
+        return SnapshotElementReference(
             snapshotID: try flags.requiredValue(for: "--snapshot-id"),
             elementID: try flags.requiredValue(for: "--element-id")
         )
@@ -398,11 +416,55 @@ public struct CommandLineTool {
 
     private func mouseButton(from rawValue: String?) throws -> MouseButton {
         let value = rawValue ?? MouseButton.left.rawValue
+        if value == "middle" {
+            return .center
+        }
+
         guard let button = MouseButton(rawValue: value) else {
             throw CLIError.invalidFlagValue("--button", value)
         }
 
         return button
+    }
+
+    private func keyRequest(from flags: ParsedFlags, app: String?) throws -> KeyActionRequest {
+        let rawValue = try flags.requiredValue(for: "--key")
+        let parts = rawValue
+            .split(separator: "+", omittingEmptySubsequences: false)
+            .map(String.init)
+
+        guard let rawKey = parts.last, rawKey.isEmpty == false else {
+            throw CLIError.invalidFlagValue("--key", rawValue)
+        }
+
+        let modifiers = try parts.dropLast().map { try keyModifier(from: $0, rawValue: rawValue) }
+        return KeyActionRequest(key: rawKey, modifiers: unique(modifiers), app: app)
+    }
+
+    private func keyModifier(from value: String, rawValue: String) throws -> KeyModifier {
+        switch value.lowercased() {
+        case "super", "cmd", "command", "meta":
+            return .command
+        case "shift":
+            return .shift
+        case "option", "alt":
+            return .option
+        case "control", "ctrl":
+            return .control
+        default:
+            throw CLIError.invalidFlagValue("--key", rawValue)
+        }
+    }
+
+    private func unique(_ modifiers: [KeyModifier]) -> [KeyModifier] {
+        var seen = Set<KeyModifier>()
+        var result: [KeyModifier] = []
+
+        for modifier in modifiers where seen.insert(modifier).inserted {
+            result.append(modifier)
+        }
+
+        return result
     }
 
     private func scrollDirection(from rawValue: String) throws -> ScrollDirection {
@@ -431,14 +493,14 @@ public struct CommandLineTool {
           computer-use permissions get --machine <name>
           computer-use permissions request --machine <name>
           computer-use apps list --machine <name>
-          computer-use state get --machine <name> [--bundle-id <bundle-id>]
-          computer-use action click --machine <name> (--x <x> --y <y> | --snapshot-id <id> --element-id <id>)
-          computer-use action type --machine <name> --text <text>
-          computer-use action key --machine <name> --key <key>
-          computer-use action drag --machine <name> --from-x <x> --from-y <y> --to-x <x> --to-y <y>
-          computer-use action scroll --machine <name> --snapshot-id <id> --element-id <id> --direction <up|down|left|right> [--pages <n>]
-          computer-use action set-value --machine <name> --snapshot-id <id> --element-id <id> --value <value>
-          computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>
+          computer-use state get --machine <name> [--app <name-or-bundle-id> | --bundle-id <bundle-id>]
+          computer-use action click --machine <name> [--app <app>] (--x <x> --y <y> | --snapshot-id <id> --element-id <id> | [--snapshot-id <id>] --element-index <n>)
+          computer-use action type --machine <name> [--app <app>] --text <text>
+          computer-use action key --machine <name> [--app <app>] --key <key-or-combo>
+          computer-use action drag --machine <name> [--app <app>] --from-x <x> --from-y <y> --to-x <x> --to-y <y>
+          computer-use action scroll --machine <name> [--app <app>] ([--snapshot-id <id>] --element-index <n> | --snapshot-id <id> --element-id <id>) --direction <up|down|left|right> [--pages <n>]
+          computer-use action set-value --machine <name> [--app <app>] ([--snapshot-id <id>] --element-index <n> | --snapshot-id <id> --element-id <id>) --value <value>
+          computer-use action action --machine <name> [--app <app>] ([--snapshot-id <id>] --element-index <n> | --snapshot-id <id> --element-id <id>) --name <AXAction>
         """
     }
 }
@@ -615,6 +677,18 @@ struct ParsedFlags {
 
     func requiredDoubleValue(for key: String) throws -> Double {
         let rawValue = try requiredValue(for: key)
+        guard let value = Double(rawValue) else {
+            throw CLIError.invalidDoubleFlag(key, rawValue)
+        }
+
+        return value
+    }
+
+    func optionalDoubleValue(for key: String) throws -> Double? {
+        guard let rawValue = values[key] else {
+            return nil
+        }
+
         guard let value = Double(rawValue) else {
             throw CLIError.invalidDoubleFlag(key, rawValue)
         }

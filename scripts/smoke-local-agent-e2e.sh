@@ -31,15 +31,17 @@ done
 curl -fsS "$BASE_URL/health" >/tmp/cu-e2e-health.json
 curl -fsS "$BASE_URL/permissions" >/tmp/cu-e2e-permissions.json
 curl -fsS "$BASE_URL/apps" >/tmp/cu-e2e-apps.json
+curl -fsS -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"app":"TextEdit"}' \
+  "$BASE_URL/apps/activate" >/tmp/cu-e2e-textedit-activate.json
 
-osascript \
-  -e 'tell application "TextEdit" to activate' \
-  -e 'tell application "TextEdit" to make new document' >/dev/null
+osascript -e 'tell application "TextEdit" to make new document' >/dev/null
 sleep 1
 
 curl -fsS -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"bundle_id":"com.apple.TextEdit"}' \
+  -d '{"app":"TextEdit"}' \
   "$BASE_URL/state" >/tmp/cu-e2e-textedit-state-before.json
 
 python3 - "$BASE_URL" "$MARKER" "$SET_VALUE_MARKER" <<'PY'
@@ -97,21 +99,19 @@ if text_node is None:
     raise SystemExit("no clickable TextEdit AX node with bounds found")
 
 window_node = next(
-    (node for node in nodes if node.get("role") == "AXWindow"),
+    (node for node in nodes if node.get("role") == "AXWindow" and node.get("index") is not None),
     None,
 )
 
-snapshot_id = state["snapshot_id"]
-element_id = text_node["id"]
-post("/actions/click", {"snapshot_id": snapshot_id, "element_id": element_id})
-post("/actions/type", {"text": marker})
-post("/actions/key", {"key": "Return"})
-post("/actions/type", {"text": "-after-return"})
+element_index = text_node["index"]
+post("/actions/click", {"app": "TextEdit", "element_index": element_index})
+post("/actions/type", {"app": "TextEdit", "text": marker})
+post("/actions/key", {"app": "TextEdit", "key": "a", "modifiers": ["command"]})
 post(
     "/actions/set-value",
     {
-        "snapshot_id": snapshot_id,
-        "element_id": element_id,
+        "app": "TextEdit",
+        "element_index": element_index,
         "value": set_value_marker,
     },
 )
@@ -119,19 +119,19 @@ if window_node is not None:
     post(
         "/actions/action",
         {
-            "snapshot_id": snapshot_id,
-            "element_id": window_node["id"],
+            "app": "TextEdit",
+            "element_index": window_node["index"],
             "name": "AXRaise",
         },
     )
 
 time.sleep(1)
-post("/state", {"bundle_id": "com.apple.TextEdit"})
+post("/state", {"app": "TextEdit"})
 PY
 
 curl -fsS -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"bundle_id":"com.apple.TextEdit"}' \
+  -d '{"app":"TextEdit"}' \
   "$BASE_URL/state" >/tmp/cu-e2e-textedit-state-after.json
 
 python3 - "$SET_VALUE_MARKER" <<'PY'
@@ -154,18 +154,19 @@ summary = {
     "textedit_app": state.get("app", {}).get("name"),
     "textedit_snapshot_id": state.get("snapshot_id"),
     "textedit_ax_nodes": len(state.get("ax_tree", {}).get("nodes", [])),
+    "textedit_ax_tree_text": bool(state.get("ax_tree_text")),
     "textedit_screenshot_base64_len": len(state.get("screenshot", {}).get("base64", "")),
 }
 print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 if not summary["textedit_marker_found"]:
     raise SystemExit("TextEdit marker was not found in AX tree")
+if not summary["textedit_ax_tree_text"]:
+    raise SystemExit("TextEdit state did not include ax_tree_text")
 PY
 
-osascript -e 'tell application "Finder" to activate' >/dev/null
-sleep 1
 curl -fsS -X POST \
   -H 'Content-Type: application/json' \
-  -d '{"bundle_id":"com.apple.finder"}' \
+  -d '{"app":"Finder"}' \
   "$BASE_URL/state" >/tmp/cu-e2e-finder-state.json
 
 python3 - "$BASE_URL" <<'PY'
@@ -206,6 +207,7 @@ bounds = target["bounds"]
 post(
     "/actions/click",
     {
+        "app": "Finder",
         "x": bounds["x"] + min(bounds["width"] / 2, 20),
         "y": bounds["y"] + min(bounds["height"] / 2, 20),
     },
@@ -213,15 +215,16 @@ post(
 post(
     "/actions/scroll",
     {
-        "snapshot_id": state["snapshot_id"],
-        "element_id": target["id"],
+        "app": "Finder",
+        "element_index": target["index"],
         "direction": "down",
-        "pages": 1,
+        "pages": 0.5,
     },
 )
 post(
     "/actions/drag",
     {
+        "app": "Finder",
         "from": {"x": bounds["x"] + 10, "y": bounds["y"] + 10},
         "to": {"x": bounds["x"] + 20, "y": bounds["y"] + 20},
     },

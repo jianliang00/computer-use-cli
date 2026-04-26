@@ -81,24 +81,24 @@ List running apps and capture UI state:
 
 ```bash
 computer-use apps list --machine demo
-computer-use state get --machine demo --bundle-id com.apple.TextEdit
+computer-use state get --machine demo --app TextEdit
 ```
 
 Send basic actions:
 
 ```bash
-computer-use action click --machine demo --x 120 --y 240
-computer-use action type --machine demo --text "hello"
-computer-use action key --machine demo --key Return
+computer-use action click --machine demo --app TextEdit --x 120 --y 240
+computer-use action type --machine demo --app TextEdit --text "hello"
+computer-use action key --machine demo --app TextEdit --key cmd+a
 ```
 
-`state get` returns a `snapshot_id` and element IDs. Use those IDs for
-element-targeted actions:
+`state get` returns a `snapshot_id`, element IDs, and element indexes. Use
+element indexes for plugin-style element-targeted actions:
 
 ```bash
 computer-use action click --machine demo \
-  --snapshot-id <snapshot-id> \
-  --element-id <element-id>
+  --app TextEdit \
+  --element-index <element-index>
 ```
 
 ## Common Commands
@@ -124,10 +124,10 @@ computer-use permissions get --machine demo
 Run UI actions:
 
 ```bash
-computer-use action drag --machine demo --from-x 100 --from-y 100 --to-x 400 --to-y 300
-computer-use action scroll --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --direction down
-computer-use action set-value --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --value "new value"
-computer-use action action --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --name AXPress
+computer-use action drag --machine demo --app TextEdit --from-x 100 --from-y 100 --to-x 400 --to-y 300
+computer-use action scroll --machine demo --app TextEdit --element-index <element-index> --direction down --pages 0.5
+computer-use action set-value --machine demo --app TextEdit --element-index <element-index> --value "new value"
+computer-use action action --machine demo --app TextEdit --element-index <element-index> --name AXPress
 ```
 
 ## Which Release File Should I Download?

@@ -175,6 +175,17 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
     #expect(agentClient.stateRequests == [StateRequest(bundleID: "com.apple.TextEdit")])
 
     _ = try tool.run(arguments: [
+        "state",
+        "get",
+        "--machine", "demo",
+        "--app", "TextEdit",
+    ])
+    #expect(agentClient.stateRequests == [
+        StateRequest(bundleID: "com.apple.TextEdit"),
+        StateRequest(app: "TextEdit"),
+    ])
+
+    _ = try tool.run(arguments: [
         "action",
         "click",
         "--machine", "demo",
@@ -187,6 +198,20 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
 
     _ = try tool.run(arguments: [
         "action",
+        "click",
+        "--machine", "demo",
+        "--app", "TextEdit",
+        "--element-index", "1",
+        "--button", "middle",
+    ])
+    #expect(agentClient.clickRequests.last == ClickActionRequest(
+        target: .element(SnapshotElementReference(elementIndex: 1)),
+        button: .center,
+        app: "TextEdit"
+    ))
+
+    _ = try tool.run(arguments: [
+        "action",
         "type",
         "--machine", "demo",
         "--",
@@ -194,6 +219,35 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
         "world",
     ])
     #expect(agentClient.typeRequests == [TypeActionRequest(text: "hello world")])
+
+    _ = try tool.run(arguments: [
+        "action",
+        "key",
+        "--machine", "demo",
+        "--app", "TextEdit",
+        "--key", "cmd+shift+g",
+    ])
+    #expect(agentClient.keyRequests == [
+        KeyActionRequest(key: "g", modifiers: [.command, .shift], app: "TextEdit"),
+    ])
+
+    _ = try tool.run(arguments: [
+        "action",
+        "scroll",
+        "--machine", "demo",
+        "--app", "TextEdit",
+        "--element-index", "2",
+        "--direction", "down",
+        "--pages", "0.5",
+    ])
+    #expect(agentClient.scrollRequests == [
+        ScrollActionRequest(
+            target: SnapshotElementReference(elementIndex: 2),
+            direction: .down,
+            pages: 0.5,
+            app: "TextEdit"
+        ),
+    ])
 
     let doctor = try tool.run(arguments: [
         "agent",
@@ -470,6 +524,8 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     private(set) var stateRequests: [StateRequest] = []
     private(set) var clickRequests: [ClickActionRequest] = []
     private(set) var typeRequests: [TypeActionRequest] = []
+    private(set) var keyRequests: [KeyActionRequest] = []
+    private(set) var scrollRequests: [ScrollActionRequest] = []
 
     func health(baseURL: URL) throws -> HealthResponse {
         baseURLs.append(baseURL)
@@ -524,6 +580,7 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
 
     func key(baseURL: URL, request: KeyActionRequest) throws -> ActionResponse {
         baseURLs.append(baseURL)
+        keyRequests.append(request)
         return ActionResponse()
     }
 
@@ -534,6 +591,7 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
 
     func scroll(baseURL: URL, request: ScrollActionRequest) throws -> ActionResponse {
         baseURLs.append(baseURL)
+        scrollRequests.append(request)
         return ActionResponse()
     }
 

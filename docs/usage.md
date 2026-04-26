@@ -104,45 +104,64 @@ List running GUI apps:
 computer-use apps list --machine demo
 ```
 
+The app list includes currently running GUI apps first. Apps used recently
+through the CLI may remain in the list with `is_running: false`, `pid: 0`,
+`last_used`, and `uses` fields so clients can preserve plugin-style app
+history.
+
 Capture state for the frontmost app or a target bundle:
 
 ```bash
 computer-use state get --machine demo
+computer-use state get --machine demo --app TextEdit
 computer-use state get --machine demo --bundle-id com.apple.TextEdit
 ```
+
+`state get` returns a screenshot payload, `snapshot_id`, a machine-readable
+`ax_tree`, a readable indexed `ax_tree_text`, and `focused_element` when
+Accessibility reports one. Prefer `--app` for user-facing workflows; keep
+`--bundle-id` for scripts that already target a specific bundle identifier.
 
 Run coordinate actions:
 
 ```bash
-computer-use action click --machine demo --x 120 --y 240
-computer-use action drag --machine demo --from-x 100 --from-y 100 --to-x 400 --to-y 300
-computer-use action type --machine demo --text "hello"
-computer-use action key --machine demo --key Return
+computer-use action click --machine demo --app TextEdit --x 120 --y 240
+computer-use action drag --machine demo --app TextEdit --from-x 100 --from-y 100 --to-x 400 --to-y 300
+computer-use action type --machine demo --app TextEdit --text "hello"
+computer-use action key --machine demo --app TextEdit --key cmd+a
 ```
 
-Run element actions using IDs from `state get`:
+Run element actions using indexes from `state get`:
 
 ```bash
 computer-use action click --machine demo \
-  --snapshot-id <snapshot-id> \
-  --element-id <element-id>
+  --app TextEdit \
+  --element-index <element-index>
 
 computer-use action scroll --machine demo \
-  --snapshot-id <snapshot-id> \
-  --element-id <element-id> \
+  --app TextEdit \
+  --element-index <element-index> \
   --direction down \
-  --pages 1
+  --pages 0.5
 
 computer-use action set-value --machine demo \
-  --snapshot-id <snapshot-id> \
-  --element-id <element-id> \
+  --app TextEdit \
+  --element-index <element-index> \
   --value "new value"
 
 computer-use action action --machine demo \
-  --snapshot-id <snapshot-id> \
-  --element-id <element-id> \
+  --app TextEdit \
+  --element-index <element-index> \
   --name AXPress
 ```
 
-Snapshots are short-lived. If an element action returns `snapshot_expired`, call
-`state get` again and use the new IDs.
+The lower-level `--snapshot-id <id> --element-id <id>` form remains supported
+for deterministic scripts. `--element-index` without `--snapshot-id` resolves
+against the latest unexpired snapshot for `--app` when an app target is
+provided; otherwise it resolves against the latest unexpired snapshot overall.
+
+Snapshots are short-lived. The guest keeps up to 8 snapshots for roughly 60
+seconds. If an element action returns `snapshot_expired`, call `state get`
+again and use the new indexes or IDs. If a supplied `--snapshot-id` belongs to a
+different app than `--app`, the action fails instead of applying an index from
+the wrong app.

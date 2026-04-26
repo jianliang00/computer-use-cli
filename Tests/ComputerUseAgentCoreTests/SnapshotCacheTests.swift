@@ -47,6 +47,61 @@ func snapshotElementCacheKeepsMostRecentSnapshotsWithinCapacity() throws {
     }
 }
 
+@Test
+func snapshotElementCacheResolvesElementIndexesFromLatestSnapshot() throws {
+    let clock = TestClock(date: Date(timeIntervalSince1970: 3_000))
+    let cache = SnapshotElementCache<String>(
+        policy: SnapshotCachePolicy(capacity: 8, timeToLive: 60),
+        now: { clock.date }
+    )
+
+    cache.store(
+        snapshotID: "snap-001",
+        elements: ["ax-1": "first"],
+        elementIDsByIndex: [0: "ax-1"],
+        appBundleIdentifier: "com.apple.TextEdit"
+    )
+    clock.date = Date(timeIntervalSince1970: 3_001)
+    cache.store(
+        snapshotID: "snap-002",
+        elements: ["ax-1": "second"],
+        elementIDsByIndex: [0: "ax-1"],
+        appBundleIdentifier: "com.apple.Safari"
+    )
+
+    #expect(try cache.element(snapshotID: nil, elementID: nil, elementIndex: 0) == "second")
+    #expect(try cache.element(
+        snapshotID: nil,
+        elementID: nil,
+        elementIndex: 0,
+        appBundleIdentifier: "com.apple.TextEdit"
+    ) == "first")
+    #expect(try cache.element(snapshotID: "snap-001", elementID: nil, elementIndex: 0) == "first")
+
+    do {
+        _ = try cache.element(snapshotID: "snap-001", elementID: nil, elementIndex: 9)
+        Issue.record("expected unknown element index")
+    } catch let error as SnapshotCacheError {
+        #expect(error == .elementIndexNotFound(snapshotID: "snap-001", elementIndex: 9))
+    }
+
+    do {
+        _ = try cache.element(
+            snapshotID: "snap-001",
+            elementID: nil,
+            elementIndex: 0,
+            appBundleIdentifier: "com.apple.Safari"
+        )
+        Issue.record("expected app mismatch")
+    } catch let error as SnapshotCacheError {
+        #expect(error == .snapshotAppMismatch(
+            snapshotID: "snap-001",
+            expectedBundleID: "com.apple.Safari",
+            actualBundleID: "com.apple.TextEdit"
+        ))
+    }
+}
+
 private final class TestClock: @unchecked Sendable {
     var date: Date
 

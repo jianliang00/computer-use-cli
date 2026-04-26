@@ -19,6 +19,8 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
     private let permissionProvider: any PermissionStatusProviding
     private let permissionRequester: any PermissionRequesting
     private let applicationLister: any RunningApplicationListing
+    private let applicationActivator: any ApplicationActivating
+    private let applicationUsageTracker: any ApplicationUsageTracking
     private let stateCapturer: any StateCapturing
     private let actionPerformer: any ActionPerforming
 
@@ -26,6 +28,8 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
         permissionProvider: any PermissionStatusProviding = MacOSPermissionStatusProvider(),
         permissionRequester: (any PermissionRequesting)? = nil,
         applicationLister: any RunningApplicationListing = WorkspaceRunningApplicationLister(),
+        applicationActivator: (any ApplicationActivating)? = nil,
+        applicationUsageTracker: any ApplicationUsageTracking = FileApplicationUsageStore(),
         stateCapturer: (any StateCapturing)? = nil,
         actionPerformer: (any ActionPerforming)? = nil
     ) {
@@ -33,6 +37,8 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
         self.permissionProvider = permissionProvider
         self.permissionRequester = permissionRequester ?? MacOSPermissionRequester(statusProvider: permissionProvider)
         self.applicationLister = applicationLister
+        self.applicationActivator = applicationActivator ?? WorkspaceApplicationActivator(applicationLister: applicationLister)
+        self.applicationUsageTracker = applicationUsageTracker
         self.stateCapturer = stateCapturer ?? MacOSStateCapturer(
             applicationLister: applicationLister,
             elementCache: elementCache
@@ -49,7 +55,15 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
     }
 
     public func runningApplications() async throws -> [RunningApplication] {
-        try await applicationLister.runningApplications()
+        try applicationUsageTracker.applicationsByMergingUsage(
+            with: try await applicationLister.runningApplications()
+        )
+    }
+
+    public func activateApplication(target: String) async throws -> RunningApplication {
+        try applicationUsageTracker.recordUsage(
+            application: try await applicationActivator.activateApplication(target: target)
+        )
     }
 
     public func captureState() async throws -> AgentStateSnapshot {
@@ -57,7 +71,26 @@ public struct DefaultComputerUseSessionAgent: ComputerUseSessionAgent {
     }
 
     public func captureState(bundleIdentifier: String?) async throws -> AgentStateSnapshot {
-        try await stateCapturer.captureState(bundleIdentifier: bundleIdentifier)
+        let snapshot = try await stateCapturer.captureState(bundleIdentifier: bundleIdentifier)
+        if let application = selectedApplication(
+            applications: snapshot.applications,
+            bundleIdentifier: bundleIdentifier
+        ) {
+            _ = try applicationUsageTracker.recordUsage(application: application)
+        }
+
+        return snapshot
+    }
+
+    private func selectedApplication(
+        applications: [RunningApplication],
+        bundleIdentifier: String?
+    ) -> RunningApplication? {
+        if let bundleIdentifier {
+            return applications.first { $0.bundleIdentifier == bundleIdentifier }
+        }
+
+        return applications.first(where: \.isFrontmost) ?? applications.first
     }
 
     public func click(_ request: ClickActionRequest) async throws -> ActionReceipt {

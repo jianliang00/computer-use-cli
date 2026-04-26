@@ -34,7 +34,10 @@ func sessionAgentHTTPRouterServesHealthPermissionsAndApps() async throws {
             bundleID: "com.apple.TextEdit",
             name: "TextEdit",
             pid: 123,
-            isFrontmost: true
+            isFrontmost: true,
+            isRunning: true,
+            lastUsed: "1970-01-01T01:06:40Z",
+            uses: 3
         ),
     ])
 }
@@ -57,7 +60,20 @@ func sessionAgentHTTPRouterMapsStateAndActions() async throws {
     #expect(state.app.bundleID == "com.apple.TextEdit")
     #expect(state.screenshot.base64 == Data([1, 2, 3]).base64EncodedString())
     #expect(state.axTree.nodes.map(\.id) == ["root", "text"])
+    #expect(state.axTree.nodes.map(\.index) == [0, 1])
+    #expect(state.axTreeText?.contains("0 AXWindow Untitled") == true)
+    #expect(state.focusedElement?.id == "text")
     #expect(agent.stateBundleIdentifiers == ["com.apple.TextEdit"])
+
+    let appStateRequest = SessionAgentHTTPRequest(
+        method: .post,
+        path: "/state",
+        body: try AgentProtocolJSON.encode(StateRequest(app: "TextEdit"))
+    )
+    let appStateResponse = await router.handle(appStateRequest)
+    #expect(appStateResponse.statusCode == 200)
+    #expect(agent.activationTargets == ["TextEdit"])
+    #expect(agent.stateBundleIdentifiers == ["com.apple.TextEdit", "com.apple.TextEdit"])
 
     let clickRequest = SessionAgentHTTPRequest(
         method: .post,
@@ -81,9 +97,37 @@ func sessionAgentHTTPRouterMapsStateAndActions() async throws {
     )
     let elementClickResponse = await router.handle(elementClickRequest)
     #expect(elementClickResponse.statusCode == 200)
+
+    let indexedClickRequest = SessionAgentHTTPRequest(
+        method: .post,
+        path: "/actions/click",
+        body: try AgentProtocolJSON.encode(AgentProtocol.ClickActionRequest(
+            target: .element(AgentProtocol.SnapshotElementReference(elementIndex: 1)),
+            app: "TextEdit"
+        ))
+    )
+    let indexedClickResponse = await router.handle(indexedClickRequest)
+    #expect(indexedClickResponse.statusCode == 200)
     #expect(agent.clicks == [
         ComputerUseAgentCore.ClickActionRequest(location: ComputerUseAgentCore.Point(x: 10, y: 20)),
         ComputerUseAgentCore.ClickActionRequest(snapshotID: "snap-001", elementID: "text"),
+        ComputerUseAgentCore.ClickActionRequest(elementIndex: 1, appBundleIdentifier: "com.apple.TextEdit"),
+    ])
+    #expect(agent.activationTargets == ["TextEdit", "TextEdit"])
+
+    let keyRequest = SessionAgentHTTPRequest(
+        method: .post,
+        path: "/actions/key",
+        body: try AgentProtocolJSON.encode(AgentProtocol.KeyActionRequest(
+            key: "g",
+            modifiers: [.command, .shift],
+            app: "TextEdit"
+        ))
+    )
+    let keyResponse = await router.handle(keyRequest)
+    #expect(keyResponse.statusCode == 200)
+    #expect(agent.keys == [
+        ComputerUseAgentCore.KeyActionRequest(key: "g", modifiers: [.command, .shift]),
     ])
 }
 
@@ -118,11 +162,15 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
             bundleIdentifier: "com.apple.TextEdit",
             name: "TextEdit",
             processIdentifier: 123,
-            isFrontmost: true
+            isFrontmost: true,
+            lastUsed: Date(timeIntervalSince1970: 4_000),
+            useCount: 3
         ),
     ]
     private(set) var clicks: [ComputerUseAgentCore.ClickActionRequest] = []
+    private(set) var keys: [ComputerUseAgentCore.KeyActionRequest] = []
     private(set) var stateBundleIdentifiers: [String?] = []
+    private(set) var activationTargets: [String] = []
 
     func currentPermissions() async throws -> PermissionSnapshot {
         permissions
@@ -136,6 +184,11 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
         applications
     }
 
+    func activateApplication(target: String) async throws -> ComputerUseAgentCore.RunningApplication {
+        activationTargets.append(target)
+        return applications[0]
+    }
+
     func captureState(bundleIdentifier: String?) async throws -> AgentStateSnapshot {
         stateBundleIdentifiers.append(bundleIdentifier)
         return AgentStateSnapshot(
@@ -146,6 +199,7 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
                 bytes: [1, 2, 3]
             ),
             accessibilityRoot: AccessibilityNode(
+                index: 0,
                 id: "root",
                 role: "AXWindow",
                 title: "Untitled",
@@ -155,13 +209,16 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
                 ),
                 children: [
                     AccessibilityNode(
+                        index: 1,
                         id: "text",
                         role: "AXTextArea",
-                        value: "hello"
+                        value: "hello",
+                        actions: ["AXPress"]
                     ),
                 ]
             ),
-            applications: applications
+            applications: applications,
+            focusedElementID: "text"
         )
     }
 
@@ -175,7 +232,8 @@ private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendab
     }
 
     func key(_ request: ComputerUseAgentCore.KeyActionRequest) async throws -> ActionReceipt {
-        ActionReceipt(accepted: true)
+        keys.append(request)
+        return ActionReceipt(accepted: true)
     }
 
     func drag(_ request: ComputerUseAgentCore.DragActionRequest) async throws -> ActionReceipt {

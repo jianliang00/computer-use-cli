@@ -19,6 +19,8 @@ public struct ClickActionRequest: Codable, Equatable, Sendable {
     public var location: Point?
     public var snapshotID: String?
     public var elementID: String?
+    public var elementIndex: Int?
+    public var appBundleIdentifier: String?
     public var button: MouseButton
     public var clickCount: Int
 
@@ -30,6 +32,8 @@ public struct ClickActionRequest: Codable, Equatable, Sendable {
         self.location = location
         self.snapshotID = nil
         self.elementID = nil
+        self.elementIndex = nil
+        self.appBundleIdentifier = nil
         self.button = button
         self.clickCount = clickCount
     }
@@ -38,11 +42,30 @@ public struct ClickActionRequest: Codable, Equatable, Sendable {
         snapshotID: String,
         elementID: String,
         button: MouseButton = .left,
-        clickCount: Int = 1
+        clickCount: Int = 1,
+        appBundleIdentifier: String? = nil
     ) {
         self.location = nil
         self.snapshotID = snapshotID
         self.elementID = elementID
+        self.elementIndex = nil
+        self.appBundleIdentifier = appBundleIdentifier
+        self.button = button
+        self.clickCount = clickCount
+    }
+
+    public init(
+        snapshotID: String? = nil,
+        elementIndex: Int,
+        button: MouseButton = .left,
+        clickCount: Int = 1,
+        appBundleIdentifier: String? = nil
+    ) {
+        self.location = nil
+        self.snapshotID = snapshotID
+        self.elementID = nil
+        self.elementIndex = elementIndex
+        self.appBundleIdentifier = appBundleIdentifier
         self.button = button
         self.clickCount = clickCount
     }
@@ -82,41 +105,92 @@ public struct DragActionRequest: Codable, Equatable, Sendable {
 public struct ScrollActionRequest: Codable, Equatable, Sendable {
     public var deltaX: Double
     public var deltaY: Double
+    public var snapshotID: String?
+    public var elementID: String?
+    public var elementIndex: Int?
+    public var appBundleIdentifier: String?
 
-    public init(deltaX: Double, deltaY: Double) {
+    public init(
+        deltaX: Double,
+        deltaY: Double,
+        snapshotID: String? = nil,
+        elementID: String? = nil,
+        elementIndex: Int? = nil,
+        appBundleIdentifier: String? = nil
+    ) {
         self.deltaX = deltaX
         self.deltaY = deltaY
+        self.snapshotID = snapshotID
+        self.elementID = elementID
+        self.elementIndex = elementIndex
+        self.appBundleIdentifier = appBundleIdentifier
     }
 }
 
 public struct SetValueActionRequest: Codable, Equatable, Sendable {
     public var snapshotID: String?
-    public var elementID: String
+    public var elementID: String?
+    public var elementIndex: Int?
+    public var appBundleIdentifier: String?
     public var value: String
 
     public init(
         elementID: String,
         value: String,
-        snapshotID: String? = nil
+        snapshotID: String? = nil,
+        appBundleIdentifier: String? = nil
     ) {
         self.snapshotID = snapshotID
         self.elementID = elementID
+        self.elementIndex = nil
+        self.appBundleIdentifier = appBundleIdentifier
+        self.value = value
+    }
+
+    public init(
+        elementIndex: Int,
+        value: String,
+        snapshotID: String? = nil,
+        appBundleIdentifier: String? = nil
+    ) {
+        self.snapshotID = snapshotID
+        self.elementID = nil
+        self.elementIndex = elementIndex
+        self.appBundleIdentifier = appBundleIdentifier
         self.value = value
     }
 }
 
 public struct ElementActionRequest: Codable, Equatable, Sendable {
     public var snapshotID: String?
-    public var elementID: String
+    public var elementID: String?
+    public var elementIndex: Int?
+    public var appBundleIdentifier: String?
     public var actionName: String
 
     public init(
         elementID: String,
         actionName: String,
-        snapshotID: String? = nil
+        snapshotID: String? = nil,
+        appBundleIdentifier: String? = nil
     ) {
         self.snapshotID = snapshotID
         self.elementID = elementID
+        self.elementIndex = nil
+        self.appBundleIdentifier = appBundleIdentifier
+        self.actionName = actionName
+    }
+
+    public init(
+        elementIndex: Int,
+        actionName: String,
+        snapshotID: String? = nil,
+        appBundleIdentifier: String? = nil
+    ) {
+        self.snapshotID = snapshotID
+        self.elementID = nil
+        self.elementIndex = elementIndex
+        self.appBundleIdentifier = appBundleIdentifier
         self.actionName = actionName
     }
 }
@@ -211,6 +285,15 @@ public struct MacOSActionPerformer: ActionPerforming {
     }
 
     public func scroll(_ request: ScrollActionRequest) async throws -> ActionReceipt {
+        if request.elementID != nil || request.elementIndex != nil {
+            _ = try cachedElement(
+                snapshotID: request.snapshotID,
+                elementID: request.elementID,
+                elementIndex: request.elementIndex,
+                appBundleIdentifier: request.appBundleIdentifier
+            )
+        }
+
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .pixel,
@@ -229,7 +312,9 @@ public struct MacOSActionPerformer: ActionPerforming {
     public func setValue(_ request: SetValueActionRequest) async throws -> ActionReceipt {
         let element = try cachedElement(
             snapshotID: request.snapshotID,
-            elementID: request.elementID
+            elementID: request.elementID,
+            elementIndex: request.elementIndex,
+            appBundleIdentifier: request.appBundleIdentifier
         )
         let result = AXUIElementSetAttributeValue(
             element,
@@ -246,7 +331,9 @@ public struct MacOSActionPerformer: ActionPerforming {
     public func perform(_ request: ElementActionRequest) async throws -> ActionReceipt {
         let element = try cachedElement(
             snapshotID: request.snapshotID,
-            elementID: request.elementID
+            elementID: request.elementID,
+            elementIndex: request.elementIndex,
+            appBundleIdentifier: request.appBundleIdentifier
         )
         let result = AXUIElementPerformAction(
             element,
@@ -337,17 +424,20 @@ public struct MacOSActionPerformer: ActionPerforming {
 
     private func cachedElement(
         snapshotID: String?,
-        elementID: String
+        elementID: String?,
+        elementIndex: Int?,
+        appBundleIdentifier: String?
     ) throws -> AXUIElement {
-        guard let snapshotID else {
-            throw SnapshotCacheError.snapshotExpired("")
-        }
-
         guard let elementCache else {
-            throw SnapshotCacheError.snapshotExpired(snapshotID)
+            throw SnapshotCacheError.snapshotExpired(snapshotID ?? "")
         }
 
-        return try elementCache.element(snapshotID: snapshotID, elementID: elementID)
+        return try elementCache.element(
+            snapshotID: snapshotID,
+            elementID: elementID,
+            elementIndex: elementIndex,
+            appBundleIdentifier: appBundleIdentifier
+        )
     }
 
     private func resolvedClickRequest(_ request: ClickActionRequest) throws -> ClickActionRequest {
@@ -355,12 +445,16 @@ public struct MacOSActionPerformer: ActionPerforming {
             return request
         }
 
-        guard let snapshotID = request.snapshotID,
-              let elementID = request.elementID else {
+        guard request.elementID != nil || request.elementIndex != nil else {
             throw ComputerUseAgentCoreError.unsupportedAction("click")
         }
 
-        let element = try cachedElement(snapshotID: snapshotID, elementID: elementID)
+        let element = try cachedElement(
+            snapshotID: request.snapshotID,
+            elementID: request.elementID,
+            elementIndex: request.elementIndex,
+            appBundleIdentifier: request.appBundleIdentifier
+        )
         guard let frame = frame(of: element) else {
             throw ComputerUseAgentCoreError.unsupportedAction("element click")
         }

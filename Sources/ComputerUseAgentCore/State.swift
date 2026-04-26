@@ -25,26 +25,32 @@ public struct ScreenshotFrame: Codable, Equatable, Sendable {
 }
 
 public struct AccessibilityNode: Codable, Equatable, Sendable {
+    public var index: Int?
     public var id: String
     public var role: String
     public var title: String?
     public var value: String?
     public var frame: Rect?
+    public var actions: [String]
     public var children: [AccessibilityNode]
 
     public init(
+        index: Int? = nil,
         id: String,
         role: String,
         title: String? = nil,
         value: String? = nil,
         frame: Rect? = nil,
+        actions: [String] = [],
         children: [AccessibilityNode] = []
     ) {
+        self.index = index
         self.id = id
         self.role = role
         self.title = title
         self.value = value
         self.frame = frame
+        self.actions = actions
         self.children = children
     }
 }
@@ -54,17 +60,20 @@ public struct AgentStateSnapshot: Codable, Equatable, Sendable {
     public var screenshot: ScreenshotFrame
     public var accessibilityRoot: AccessibilityNode
     public var applications: [RunningApplication]
+    public var focusedElementID: String?
 
     public init(
         snapshotID: String,
         screenshot: ScreenshotFrame,
         accessibilityRoot: AccessibilityNode,
-        applications: [RunningApplication]
+        applications: [RunningApplication],
+        focusedElementID: String? = nil
     ) {
         self.snapshotID = snapshotID
         self.screenshot = screenshot
         self.accessibilityRoot = accessibilityRoot
         self.applications = applications
+        self.focusedElementID = focusedElementID
     }
 }
 
@@ -112,8 +121,9 @@ public struct MacOSStateCapturer: StateCapturing {
         return AgentStateSnapshot(
             snapshotID: snapshotID,
             screenshot: screenshot,
-            accessibilityRoot: root,
-            applications: applications
+            accessibilityRoot: root.node,
+            applications: applications,
+            focusedElementID: root.focusedElementID
         )
     }
 
@@ -152,33 +162,46 @@ public struct MacOSStateCapturer: StateCapturing {
         snapshotID: String,
         targetApplication: RunningApplication?,
         applications: [RunningApplication]
-    ) -> AccessibilityNode {
+    ) -> (node: AccessibilityNode, focusedElementID: String?) {
         let pid = targetApplication?.processIdentifier
             ?? NSWorkspace.shared.frontmostApplication?.processIdentifier
             ?? applications.first(where: \.isFrontmost)?.processIdentifier
             ?? applications.first?.processIdentifier
 
         guard let pid else {
-            return AccessibilityNode(
+            return (
+                AccessibilityNode(
                 id: "ax-root",
                 role: "AXApplication",
                 title: "No frontmost application"
+                ),
+                nil
             )
         }
 
         var nextID = 0
+        var nextIndex = 0
         var remainingNodes = maxAccessibilityNodes
         var elements: [String: AXUIElement] = [:]
+        var elementIDsByIndex: [Int: String] = [:]
         let element = AXUIElementCreateApplication(pid)
+        let focusedElement = focusedElement(in: element)
+        var focusedElementID: String?
 
         func buildNode(
             from element: AXUIElement,
             depth: Int
         ) -> AccessibilityNode {
             nextID += 1
+            let index = nextIndex
+            nextIndex += 1
             remainingNodes -= 1
             let id = "ax-\(nextID)"
             elements[id] = element
+            elementIDsByIndex[index] = id
+            if let focusedElement, CFEqual(element, focusedElement) {
+                focusedElementID = id
+            }
 
             let childElements = depth < maxAccessibilityDepth && remainingNodes > 0
                 ? accessibilityChildren(of: element)
@@ -189,29 +212,63 @@ public struct MacOSStateCapturer: StateCapturing {
             }
 
             return AccessibilityNode(
+                index: index,
                 id: id,
                 role: stringAttribute(kAXRoleAttribute, from: element) ?? "AXUnknown",
                 title: stringAttribute(kAXTitleAttribute, from: element),
                 value: valueDescription(kAXValueAttribute, from: element),
                 frame: frame(from: element),
+                actions: actionNames(of: element),
                 children: children
             )
         }
 
         let root = buildNode(from: element, depth: 0)
-        elementCache?.store(snapshotID: snapshotID, elements: elements)
-        return root
+        elementCache?.store(
+            snapshotID: snapshotID,
+            elements: elements,
+            elementIDsByIndex: elementIDsByIndex,
+            appBundleIdentifier: targetApplication?.bundleIdentifier
+        )
+        return (root, focusedElementID)
+    }
+
+    private func focusedElement(in applicationElement: AXUIElement) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            applicationElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &value
+        ) == .success else {
+            return nil
+        }
+
+        guard let value else {
+            return nil
+        }
+
+        return (value as! AXUIElement)
+    }
+
+    private func actionNames(of element: AXUIElement) -> [String] {
+        var names: CFArray?
+        guard AXUIElementCopyActionNames(element, &names) == .success,
+              let names else {
+            return []
+        }
+
+        return (names as? [String]) ?? []
     }
 
     private func selectedApplication(
         applications: [RunningApplication],
         bundleIdentifier: String?
     ) -> RunningApplication? {
-        guard let bundleIdentifier else {
-            return nil
+        if let bundleIdentifier {
+            return applications.first { $0.bundleIdentifier == bundleIdentifier }
         }
 
-        return applications.first { $0.bundleIdentifier == bundleIdentifier }
+        return applications.first(where: \.isFrontmost) ?? applications.first
     }
 
     private func accessibilityChildren(of element: AXUIElement) -> [AXUIElement] {

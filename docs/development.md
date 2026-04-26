@@ -27,6 +27,18 @@ This validates the session agent against the current host GUI session. It is a
 developer check only; it does not validate guest image installation,
 authorization persistence, or guest bootstrapping.
 
+## Guest Plugin-Parity Smoke
+
+Run the high-level CLI smoke test against an already started, authorized guest:
+
+```bash
+MACHINE=authorized-smoke scripts/smoke-guest-plugin-parity.sh
+```
+
+This uses `computer-use` commands only. It validates app-scoped state, indexed
+element actions, modifier keys, text entry, set-value, AX actions, scroll, drag,
+and the readable accessibility tree against the guest session.
+
 ## Package The Guest App
 
 Create a local `ComputerUseAgent.app` bundle:
@@ -101,7 +113,8 @@ computer-use machine create --name authorized-smoke \
   --image local/computer-use:authorized
 computer-use machine start --machine authorized-smoke
 computer-use agent doctor --machine authorized-smoke
-computer-use state get --machine authorized-smoke --bundle-id com.apple.finder
+computer-use state get --machine authorized-smoke --app Finder
+MACHINE=authorized-smoke scripts/smoke-guest-plugin-parity.sh
 ```
 
 Do not treat a product image as user-ready until a fresh authorized-image guest

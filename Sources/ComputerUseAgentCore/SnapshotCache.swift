@@ -5,6 +5,8 @@ public final class SnapshotElementCache<Element>: @unchecked Sendable {
     private struct Entry {
         var createdAt: Date
         var elements: [String: Element]
+        var elementIDsByIndex: [Int: String]
+        var appBundleIdentifier: String?
     }
 
     private let policy: SnapshotCachePolicy
@@ -22,10 +24,17 @@ public final class SnapshotElementCache<Element>: @unchecked Sendable {
 
     public func store(
         snapshotID: String,
-        elements: [String: Element]
+        elements: [String: Element],
+        elementIDsByIndex: [Int: String] = [:],
+        appBundleIdentifier: String? = nil
     ) {
         lock.lock()
-        snapshots[snapshotID] = Entry(createdAt: now(), elements: elements)
+        snapshots[snapshotID] = Entry(
+            createdAt: now(),
+            elements: elements,
+            elementIDsByIndex: elementIDsByIndex,
+            appBundleIdentifier: appBundleIdentifier
+        )
         pruneExpiredLocked()
         pruneCapacityLocked()
         lock.unlock()
@@ -50,6 +59,71 @@ public final class SnapshotElementCache<Element>: @unchecked Sendable {
         }
 
         return element
+    }
+
+    public func element(
+        snapshotID requestedSnapshotID: String?,
+        elementID: String?,
+        elementIndex: Int?,
+        appBundleIdentifier: String? = nil
+    ) throws -> Element {
+        lock.lock()
+        pruneExpiredLocked()
+        defer {
+            lock.unlock()
+        }
+
+        let snapshotID: String
+        if let requestedSnapshotID {
+            snapshotID = requestedSnapshotID
+        } else if let appBundleIdentifier,
+                  let latestSnapshotID = snapshots
+            .filter({ _, entry in entry.appBundleIdentifier == appBundleIdentifier })
+            .max(by: { lhs, rhs in lhs.value.createdAt < rhs.value.createdAt })?.key {
+            snapshotID = latestSnapshotID
+        } else if let latestSnapshotID = snapshots.max(by: { lhs, rhs in
+            lhs.value.createdAt < rhs.value.createdAt
+        })?.key {
+            snapshotID = latestSnapshotID
+        } else {
+            throw SnapshotCacheError.snapshotExpired("")
+        }
+
+        guard let snapshot = snapshots[snapshotID] else {
+            throw SnapshotCacheError.snapshotExpired(snapshotID)
+        }
+
+        if let appBundleIdentifier,
+           let actualBundleIdentifier = snapshot.appBundleIdentifier,
+           actualBundleIdentifier != appBundleIdentifier {
+            throw SnapshotCacheError.snapshotAppMismatch(
+                snapshotID: snapshotID,
+                expectedBundleID: appBundleIdentifier,
+                actualBundleID: actualBundleIdentifier
+            )
+        }
+
+        if let elementID {
+            guard let element = snapshot.elements[elementID] else {
+                throw SnapshotCacheError.elementNotFound(snapshotID: snapshotID, elementID: elementID)
+            }
+
+            return element
+        }
+
+        if let elementIndex {
+            guard let elementID = snapshot.elementIDsByIndex[elementIndex] else {
+                throw SnapshotCacheError.elementIndexNotFound(snapshotID: snapshotID, elementIndex: elementIndex)
+            }
+
+            guard let element = snapshot.elements[elementID] else {
+                throw SnapshotCacheError.elementNotFound(snapshotID: snapshotID, elementID: elementID)
+            }
+
+            return element
+        }
+
+        throw SnapshotCacheError.snapshotExpired(snapshotID)
     }
 
     public func snapshotIDs() -> [String] {
@@ -88,6 +162,8 @@ public final class SnapshotElementCache<Element>: @unchecked Sendable {
 public enum SnapshotCacheError: Error, LocalizedError, Equatable, Sendable {
     case snapshotExpired(String)
     case elementNotFound(snapshotID: String, elementID: String)
+    case elementIndexNotFound(snapshotID: String, elementIndex: Int)
+    case snapshotAppMismatch(snapshotID: String, expectedBundleID: String, actualBundleID: String)
 
     public var errorDescription: String? {
         switch self {
@@ -95,6 +171,10 @@ public enum SnapshotCacheError: Error, LocalizedError, Equatable, Sendable {
             "snapshot \(snapshotID) has expired"
         case let .elementNotFound(snapshotID, elementID):
             "element \(elementID) was not found in snapshot \(snapshotID)"
+        case let .elementIndexNotFound(snapshotID, elementIndex):
+            "element index \(elementIndex) was not found in snapshot \(snapshotID)"
+        case let .snapshotAppMismatch(snapshotID, expectedBundleID, actualBundleID):
+            "snapshot \(snapshotID) belongs to \(actualBundleID), not \(expectedBundleID)"
         }
     }
 }

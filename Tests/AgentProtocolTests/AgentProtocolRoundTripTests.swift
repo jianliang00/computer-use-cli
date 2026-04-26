@@ -22,12 +22,44 @@ final class AgentProtocolRoundTripTests: XCTestCase {
             ),
             expectedJSON: #"{"apps":[{"bundle_id":"com.apple.TextEdit","is_frontmost":true,"name":"TextEdit","pid":123},{"bundle_id":"com.apple.finder","is_frontmost":false,"name":"Finder","pid":99}]}"#
         )
+
+        try assertRoundTrip(
+            AppsResponse(
+                apps: [
+                    RunningApplication(
+                        bundleID: "com.apple.TextEdit",
+                        name: "TextEdit",
+                        pid: 123,
+                        isFrontmost: true,
+                        isRunning: true,
+                        lastUsed: "2026-04-26T12:00:00Z",
+                        uses: 2
+                    ),
+                ]
+            ),
+            expectedJSON: #"{"apps":[{"bundle_id":"com.apple.TextEdit","is_frontmost":true,"is_running":true,"last_used":"2026-04-26T12:00:00Z","name":"TextEdit","pid":123,"uses":2}]}"#
+        )
     }
 
     func testStateRequestAndResponseRoundTrip() throws {
         try assertRoundTrip(
             StateRequest(bundleID: "com.apple.TextEdit"),
             expectedJSON: #"{"bundle_id":"com.apple.TextEdit"}"#
+        )
+
+        try assertRoundTrip(
+            StateRequest(app: "TextEdit"),
+            expectedJSON: #"{"app":"TextEdit"}"#
+        )
+
+        try assertRoundTrip(
+            AppActivationRequest(app: "TextEdit"),
+            expectedJSON: #"{"app":"TextEdit"}"#
+        )
+
+        try assertRoundTrip(
+            AppActivationResponse(app: ApplicationDescriptor(bundleID: "com.apple.TextEdit", name: "TextEdit", pid: 123)),
+            expectedJSON: #"{"app":{"bundle_id":"com.apple.TextEdit","name":"TextEdit","pid":123}}"#
         )
 
         let response = StateResponse(
@@ -96,6 +128,11 @@ final class AgentProtocolRoundTripTests: XCTestCase {
         )
 
         try assertRoundTrip(
+            KeyActionRequest(key: "g", modifiers: [.command, .shift], app: "TextEdit"),
+            expectedJSON: #"{"app":"TextEdit","key":"g","modifiers":["command","shift"]}"#
+        )
+
+        try assertRoundTrip(
             DragActionRequest(from: Point(x: 100, y: 100), to: Point(x: 400, y: 300)),
             expectedJSON: #"{"from":{"x":100,"y":100},"to":{"x":400,"y":300}}"#
         )
@@ -107,6 +144,16 @@ final class AgentProtocolRoundTripTests: XCTestCase {
                 pages: 1
             ),
             expectedJSON: #"{"direction":"down","element_id":"ax-21","pages":1,"snapshot_id":"snap-001"}"#
+        )
+
+        try assertRoundTrip(
+            ScrollActionRequest(
+                target: SnapshotElementReference(snapshotID: "snap-001", elementIndex: 3),
+                direction: .down,
+                pages: 0.5,
+                app: "TextEdit"
+            ),
+            expectedJSON: #"{"app":"TextEdit","direction":"down","element_index":3,"pages":0.5,"snapshot_id":"snap-001"}"#
         )
 
         try assertRoundTrip(
