@@ -282,6 +282,8 @@
   - 当前 runtime 对 darwin 镜像不支持 `--publish`；host-side 访问路径已改为 `container_exec`
   - 已通过真实 CLI 验证 product machine 可启动，metadata 会记录 `agentTransport: "container_exec"`
   - Dockerfile 现在通过 `configure-autologin.sh admin admin` seed `/etc/kcpassword`
+  - `configure-autologin.sh` 现在同时禁用 guest sleep、display sleep 和
+    screensaver password prompt，避免切回 VM 后进入锁屏
   - 已验证 product guest 启动后 `admin` 自动登录，`gui/501` 存在，session LaunchAgent 自动启动
 
 - [x] T11 产出 authorized image
@@ -309,11 +311,14 @@
   当前状态：
   - 已产出并加载 `local/computer-use:authorized`
   - 当前平台 manifest digest:
-    `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`
-  - 从 authorized image 新建 `cu-authorized-verify` guest 后验证通过：
+    `sha256:b2a31026a9bd29565b9b5b2e19a92fbdb93db982f81d24f198cadcf72bcf13aa`
+  - 从 regenerated authorized image 新建 `cu-authorized-verify-20260426` guest 后验证通过：
     `autoLoginUser=admin`、`/dev/console=admin 501`、LaunchAgent 运行、
     `/health` 正常、`/permissions` 为 Accessibility 和 Screen Recording
-    双 true、`/state` 返回 Finder PNG screenshot 和 270 个 AX nodes
+    双 true、`/state` 返回 PNG screenshot 和 AX tree
+  - fresh authorized guest 的锁屏策略已验证：`pmset -g` 显示 `sleep 0`、
+    `displaysleep 0`、`disksleep 0`，admin ByHost screensaver plist 包含
+    `askForPassword=0`、`askForPasswordDelay=0`、`idleTime=0`
   - 替换为最新 `ComputerUseAgent.app` 后，在 live authorized guest 中再次验证：
     `/apps` 可发现 `com.apple.TextEdit`，`/state --bundle-id
     com.apple.TextEdit` 可返回 TextEdit screenshot 和 AX tree，
@@ -332,8 +337,8 @@
   - 设计修正：项目必须像独立应用一样管理自己的 container app root 与
     install root，直接使用线上发布的 container SDK，不依赖用户已有的
     `/usr/local/bin/container`，也不复用 OpenBox runtime bundle
-  - 剩余动作：从干净 authorized guest 重新安装项目独立 container SDK 的
-    guest-agent 后重新打包 `local/computer-use:authorized`
+  - 已从安装项目独立 container SDK guest-agent 的干净 authorized guest
+    重新打包 `local/computer-use:authorized`
 
 - [x] T12 实现 `agent ping` 与 `agent doctor`
   目标：

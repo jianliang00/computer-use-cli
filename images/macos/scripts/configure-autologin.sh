@@ -68,9 +68,34 @@ write_autologin_user() {
   /bin/chmod 644 "$plist"
 }
 
+configure_unlock_policy() {
+  local user_name="$1"
+  local user_home
+
+  if [[ -z "$DESTROOT" ]]; then
+    /usr/bin/pmset -a sleep 0 displaysleep 0 disksleep 0 standby 0 powernap 0 tcpkeepalive 0 || true
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults write com.apple.screensaver askForPassword -int 0
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults write com.apple.screensaver askForPasswordDelay -int 0
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults write com.apple.screensaver idleTime -int 0
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults -currentHost write com.apple.screensaver askForPassword -int 0
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults -currentHost write com.apple.screensaver askForPasswordDelay -int 0
+    /usr/bin/sudo -u "$user_name" /usr/bin/defaults -currentHost write com.apple.screensaver idleTime -int 0
+    return
+  fi
+
+  user_home="$(target "/Users/$user_name")"
+  /bin/mkdir -p "$user_home/Library/Preferences"
+  /usr/bin/defaults write "$user_home/Library/Preferences/com.apple.screensaver" askForPassword -int 0
+  /usr/bin/defaults write "$user_home/Library/Preferences/com.apple.screensaver" askForPasswordDelay -int 0
+  /usr/bin/defaults write "$user_home/Library/Preferences/com.apple.screensaver" idleTime -int 0
+  /usr/sbin/chown -R "$user_name":staff "$user_home/Library/Preferences" 2>/dev/null || true
+}
+
 write_autologin_user "$USER_NAME"
+configure_unlock_policy "$USER_NAME"
 
 echo "configured autoLoginUser=$USER_NAME"
+echo "disabled screen lock and sleep for $USER_NAME"
 if [[ -n "$PASSWORD" ]]; then
   write_kcpassword "$PASSWORD" "$(target /etc/kcpassword)"
   echo "seeded /etc/kcpassword for $USER_NAME"

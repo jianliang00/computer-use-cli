@@ -62,7 +62,8 @@ forwarding computer-use commands to a session agent running inside the guest.
 - `local/computer-use:product` builds successfully from that base and can be
   started by the macOS container runtime. The product image seeds
   `autoLoginUser=admin` and `/etc/kcpassword` for the local `admin/admin`
-  validation account.
+  validation account, and disables guest sleep, display sleep, and screensaver
+  password prompts so the automation session stays reachable.
 - `local/computer-use:authorized` has been packaged from an authorized product
   guest and loaded locally. A fresh guest created from that image auto-logs in
   as `admin`, starts `ComputerUseAgent.app`, returns

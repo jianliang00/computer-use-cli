@@ -106,6 +106,11 @@ Latest run: 2026-04-25.
   guest, `/etc/kcpassword` was present as `root:wheel` with mode `600` and size
   `12`, `autoLoginUser` was `admin`, `/dev/console` was owned by `admin` uid
   `501`, and `GET /health` returned `{"ok":true,"version":"0.1.0"}`.
+- The same script now disables guest sleep, display sleep, and screensaver
+  password prompts. The live authorized guest was updated and verified with
+  `pmset -g` reporting `sleep 0`, `displaysleep 0`, `disksleep 0`, and the
+  `admin` screensaver preferences reporting `askForPassword=0`,
+  `askForPasswordDelay=0`, and `idleTime=0`.
 - The product guest was authorized in the GUI by adding
   `/Applications/ComputerUseAgent.app` under System Settings privacy controls
   and enabling Screen & System Audio Recording. After restarting the LaunchAgent,
@@ -180,17 +185,16 @@ Latest run: 2026-04-25.
   and Screen Recording permissions, agent health, apps, and state capture.
 - Host CLI validation is complete through Finder state and basic actions over
   the darwin `container_exec` transport. The TextEdit discovery/state/type fix
-  is validated in a live authorized guest; the remaining follow-up is
-  regenerating the local `authorized` OCI artifact from a clean source image
-  directory and rerunning the fresh-guest smoke.
+  is validated in a live authorized guest, and the local `authorized` OCI
+  artifact has been regenerated from the project-owned container SDK runtime.
 - If image loading appears idle after packaging, verify
   `swift run computer-use runtime container -- system status` is using the project-owned
   `computer-use-cli/container-sdk/<version>/app` app root and matching
   `install` root. A mismatched root means another container runtime is active
   and must not be reused for this project.
 - A rebuilt `local/computer-use:authorized` was packaged from the fresh IPSW
-  source image and loaded successfully as `darwin/arm64`, size `20807105778`,
-  manifest digest `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`.
+  source image and loaded successfully as `darwin/arm64`, size `20815411841`,
+  manifest digest `sha256:b2a31026a9bd29565b9b5b2e19a92fbdb93db982f81d24f198cadcf72bcf13aa`.
 - Root cause for the fresh host-side smoke failure was isolated to the
   guest-agent version baked into that image. The image contained
   `/usr/local/bin/container-macos-guest-agent` with SHA-256
@@ -206,6 +210,13 @@ Latest run: 2026-04-25.
 - Replacing only `/usr/local/bin/container-macos-guest-agent` in the same stopped
   clone with the active container SDK guest-agent made `container start` succeed in 13s:
   `__guest-agent-log__` and the workload both passed `process.start` on attempt
-  1. The remaining follow-up is to regenerate the local `authorized` image from
-  a clean authorized guest after installing the project-owned container SDK
-  guest-agent.
+  1. The final regenerated authorized image uses the project-owned container SDK
+  guest-agent from release `0.0.4`.
+- A fresh `cu-authorized-verify-20260426` guest created from the regenerated
+  image validated `autoLoginUser=admin`, `/dev/console=admin 501`, LaunchAgent
+  `state = running`, `GET /permissions` returning
+  `{"accessibility":true,"screen_recording":true}`, and `POST /state` returning
+  a PNG screenshot plus AX tree without any manual authorization.
+- The fresh guest also validated the no-lock policy: `pmset -g` reported
+  `sleep 0`, `displaysleep 0`, and `disksleep 0`; the admin ByHost screensaver
+  plist contained `askForPassword=0`, `askForPasswordDelay=0`, and `idleTime=0`.
