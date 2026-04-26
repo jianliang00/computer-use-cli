@@ -1,163 +1,157 @@
 # Computer Use CLI
 
-SwiftPM implementation of a host-side CLI for managing macOS guest machines and
-forwarding computer-use commands to a session agent running inside the guest.
+[![Release](https://img.shields.io/github/v/release/jianliang00/computer-use-cli?sort=semver)](https://github.com/jianliang00/computer-use-cli/releases)
+[![Release Workflow](https://github.com/jianliang00/computer-use-cli/actions/workflows/release.yml/badge.svg)](https://github.com/jianliang00/computer-use-cli/actions/workflows/release.yml)
+![macOS](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple)
+![Architecture](https://img.shields.io/badge/architecture-Apple%20silicon-lightgrey)
+![Swift](https://img.shields.io/badge/Swift-6.0-orange?logo=swift)
 
-## Verified Capabilities
+Run computer-use automation against a macOS guest from your Mac terminal.
 
-- `swift build` and `swift test` pass.
-- Machine metadata is stored under
-  `~/.computer-use-cli/machines/<machine-name>/machine.json`.
-- Host ports are allocated from `46000...46999` and duplicate requested ports
-  are rejected.
-- `ContainerBridge` wraps the `container` CLI for create, start, inspect, stop,
-  delete, logs, and published port lookup.
-- `ContainerBridge` no longer assumes a host-level `/usr/local/bin/container`.
-  By default it bootstraps the published `jianliang00/container` SDK release into an
-  isolated project-owned root under
-  `~/Library/Application Support/computer-use-cli/container-sdk/0.0.4/` and
-  starts `container-apiserver` with that app/install root.
-- Machine lifecycle commands are implemented:
-  - `computer-use machine create --name <name> --image <image> [--host-port <port>]`
-  - `computer-use machine start --machine <name> [-- <command> [args...]]`
-  - `computer-use machine inspect --machine <name>`
-  - `computer-use machine stop --machine <name>`
-  - `computer-use machine list`
-  - `computer-use machine logs --machine <name>`
-  - `computer-use machine rm --machine <name>`
-- Agent protocol JSON models cover health, permissions, apps, state, actions,
-  and protocol errors.
-- Host-side agent forwarding commands are implemented:
-  - `computer-use agent ping --machine <name>`
-  - `computer-use agent doctor --machine <name>`
-  - `computer-use permissions get --machine <name>`
-  - `computer-use permissions request --machine <name>`
-  - `computer-use apps list --machine <name>`
-  - `computer-use state get --machine <name> [--bundle-id <bundle-id>]`
-  - `computer-use action click --machine <name> (--x <x> --y <y> | --snapshot-id <id> --element-id <id>)`
-  - `computer-use action type --machine <name> --text <text>`
-  - `computer-use action key --machine <name> --key <key>`
-  - `computer-use action drag --machine <name> --from-x <x> --from-y <y> --to-x <x> --to-y <y>`
-  - `computer-use action scroll --machine <name> --snapshot-id <id> --element-id <id> --direction <up|down|left|right> [--pages <n>]`
-  - `computer-use action set-value --machine <name> --snapshot-id <id> --element-id <id> --value <value>`
-  - `computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>`
-- `computer-use-agent` starts a guest-side HTTP server on port `7777`.
-- `scripts/package-computer-use-agent-app.sh` builds `ComputerUseAgent.app`
-  with bundle id `com.jianliang00.computer-use-cli`.
-- `scripts/prepare-computer-use-image-context.sh` prepares a macOS image build
-  context with the app bundle, bootstrap agent, launchd plists, installer
-  scripts, and Dockerfile.
-- `scripts/smoke-local-agent-e2e.sh` runs a local end-to-end smoke against the
-  session agent. It verifies TextEdit input/state/action flows and Finder
-  click/scroll/drag flows.
-- `bootstrap-agent` refreshes and persists bootstrap status JSON.
-- LaunchDaemon/LaunchAgent plist templates live under `images/macos/launchd/`.
-- Guest live install validation is documented in
-  `docs/guest-image-validation.md`; it verifies launchd ownership, LaunchDaemon
-  and LaunchAgent registration, `GET /health`, `GET /permissions`, `GET /apps`,
-  expected `/state` permission denial, and `bootstrap-status.json`
-  `bootstrapped: true` inside a cloned macOS guest.
-- The validated macOS base has been packaged and loaded as
-  `local/macos-base:latest`.
-- `local/computer-use:product` builds successfully from that base and can be
-  started by the macOS container runtime. The product image seeds
-  `autoLoginUser=admin` and `/etc/kcpassword` for the local `admin/admin`
-  validation account, and disables guest sleep, display sleep, and screensaver
-  password prompts so the automation session stays reachable.
-- `local/computer-use:authorized` has been packaged from an authorized product
-  guest and loaded locally. A fresh guest created from that image auto-logs in
-  as `admin`, starts `ComputerUseAgent.app`, returns
-  `{"accessibility":true,"screen_recording":true}`, and serves `/state` with a
-  PNG screenshot plus Finder AX tree.
-- macOS images that cannot use `--publish` are handled by falling back to
-  `container exec` transport for agent HTTP requests.
-- macOS images packaged without a default entrypoint are handled by retrying
-  sandbox creation with a keepalive init command (`/usr/bin/tail -f /dev/null`), so
-  fresh `machine start` no longer fails immediately with
-  `command/entrypoint not specified for container process`.
-- The `container_exec` transport drains subprocess stdout/stderr while commands
-  are running, so large `/state` responses with screenshots can be returned
-  without hitting the macOS runtime attachment buffer limit.
-- A real CLI smoke against `local/computer-use:authorized` validates
-  machine create/start, `agent ping`, `agent doctor`, permissions, apps,
-  Finder state capture, and Finder scroll/click actions.
-- A live authorized guest updated with the latest agent build validates the
-  TextEdit workflow end to end: `/apps` lists `com.apple.TextEdit`,
-  `state get --bundle-id com.apple.TextEdit` returns a TextEdit snapshot, and
-  `action type` updates the `AXTextArea` value.
-- The session agent implements:
-  - `GET /health`
-  - `GET /permissions` using macOS Accessibility and Screen Recording checks
-  - `POST /permissions/request` to re-trigger TCC prompts after replacing the
-    agent app bundle
-  - `GET /apps` using `NSWorkspace` plus a process-table fallback for GUI apps
-    that do not surface in the workspace list
-  - `POST /state` using ScreenCaptureKit for PNG screenshots and AX APIs for
-    a basic accessibility tree, targeting the requested bundle id when one is
-    supplied
-  - snapshot cache with 8-snapshot capacity and 60-second TTL
-  - `click`, `type`, `key`, `drag`, and `scroll` through CoreGraphics
-  - `set-value` and AX `action` through cached snapshot elements
+`computer-use` lets you create a disposable macOS guest, inspect what is
+running in that guest, capture screen and accessibility state, and send UI
+actions such as click, type, key, drag, scroll, and accessibility actions.
 
-## Remaining Work
+## When To Use It
 
-- The current `local/computer-use:authorized` image was traced to a stale
-  `/usr/local/bin/container-macos-guest-agent` (`c6e6d2...`). Updating the same
-  stopped clone to the guest-agent from the active container SDK build
-  (`fee5e8...`) makes `container start` succeed: both `__guest-agent-log__` and
-  the workload pass `process.start` on the first attempt. The remaining image
-  work is repackaging `local/computer-use:authorized` from a clean authorized
-  guest with the project-owned container SDK guest-agent installed.
+Use this project when you want to:
 
-## Container Runtime
+- Drive macOS apps in an isolated guest instead of your main desktop.
+- Inspect app UI state as screenshot plus accessibility tree data.
+- Run repeatable UI automation commands from a terminal or higher-level agent.
 
-`computer-use-cli` owns its container runtime root. A normal user should not
-need to install or configure `container` before running this project.
+## What You Need
 
-- Default SDK version: `0.0.4`
-- Default runtime root:
-  `~/Library/Application Support/computer-use-cli/container-sdk/0.0.4/`
-- Default app root: `<runtime-root>/app`
-- Default install root: `<runtime-root>/install`
-- Default CLI binary: `<install-root>/bin/container`
+- Apple silicon Mac.
+- macOS 15 or newer.
+- A prepared macOS guest image, for example `local/computer-use:authorized`.
+- Swift 6 only if you are building from source.
 
-The first real container command downloads
-`https://github.com/jianliang00/container/releases/download/0.0.4/container-installer-unsigned.pkg`,
-extracts it without installing into `/usr/local`, and copies the CLI, apiserver,
-plugins, sidecar, VM manager, and guest-agent into the project-owned install
-root. If another `container` apiserver is already running with a different root,
-the command fails with a root mismatch instead of reusing that runtime.
+The guest image must already be prepared for computer-use and authorized for
+Accessibility and Screen Recording. See [Guest Image](docs/guest-image.md) if
+you need to build that image.
 
-Runtime overrides:
+## Install
 
-- `COMPUTER_USE_CONTAINER_SDK_VERSION`
-- `COMPUTER_USE_CONTAINER_RUNTIME_ROOT`
-- `COMPUTER_USE_CONTAINER_APP_ROOT`
-- `COMPUTER_USE_CONTAINER_INSTALL_ROOT`
-- `COMPUTER_USE_CONTAINER_BIN`
-- `COMPUTER_USE_CONTAINER_SDK_PKG_URL`
+Download `computer-use-<version>-macos-arm64.pkg` from a GitHub release.
 
-Useful runtime commands:
+Manual install:
 
-- `swift run computer-use runtime info`
-- `swift run computer-use runtime bootstrap`
-- `swift run computer-use runtime container -- <container-args...>`
+1. Open the `.pkg` file in Finder.
+2. Follow the macOS Installer prompts.
+3. Verify the install:
 
-Use the `runtime container --` wrapper for raw SDK operations such as image
-build, package, load, and list. It uses the same project-owned SDK root as
-`machine` commands and does not require `container` to be installed on `PATH`.
+```bash
+computer-use --help
+```
 
-## Release Signing
+Command-line install:
 
-The GitHub Actions release workflow signs the macOS executables and app bundle,
-notarizes them with Apple's notary service, staples the notary ticket where
-macOS supports it, and publishes directly installable `.pkg` artifacts:
+```bash
+sudo installer -pkg computer-use-<version>-macos-arm64.pkg -target /
+computer-use --help
+```
 
-- `computer-use-<version>-macos-arm64.pkg` installs the host CLI into
-  `/usr/local/bin/computer-use`.
-- `computer-use-guest-kit-<version>-macos-arm64.pkg` installs
-  `ComputerUseAgent.app`, `bootstrap-agent`, and the launchd plists into a
-  macOS guest.
+This installs:
 
-See `docs/release-signing.md` for the Apple Developer certificates, App Store
-Connect API key, and GitHub Actions secrets required by the workflow.
+```text
+/usr/local/bin/computer-use
+```
+
+You do not need to install any additional command-line tools before using
+`computer-use`.
+
+## Quick Start
+
+Create and start a guest:
+
+```bash
+computer-use machine create --name demo --image local/computer-use:authorized
+computer-use machine start --machine demo
+```
+
+Check that the guest is ready:
+
+```bash
+computer-use agent doctor --machine demo
+computer-use permissions get --machine demo
+```
+
+List running apps and capture UI state:
+
+```bash
+computer-use apps list --machine demo
+computer-use state get --machine demo --bundle-id com.apple.TextEdit
+```
+
+Send basic actions:
+
+```bash
+computer-use action click --machine demo --x 120 --y 240
+computer-use action type --machine demo --text "hello"
+computer-use action key --machine demo --key Return
+```
+
+`state get` returns a `snapshot_id` and element IDs. Use those IDs for
+element-targeted actions:
+
+```bash
+computer-use action click --machine demo \
+  --snapshot-id <snapshot-id> \
+  --element-id <element-id>
+```
+
+## Common Commands
+
+Manage guests:
+
+```bash
+computer-use machine list
+computer-use machine inspect --machine demo
+computer-use machine logs --machine demo
+computer-use machine stop --machine demo
+computer-use machine rm --machine demo
+```
+
+Inspect guest readiness:
+
+```bash
+computer-use agent ping --machine demo
+computer-use agent doctor --machine demo
+computer-use permissions get --machine demo
+```
+
+Run UI actions:
+
+```bash
+computer-use action drag --machine demo --from-x 100 --from-y 100 --to-x 400 --to-y 300
+computer-use action scroll --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --direction down
+computer-use action set-value --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --value "new value"
+computer-use action action --machine demo --snapshot-id <snapshot-id> --element-id <element-id> --name AXPress
+```
+
+## Which Release File Should I Download?
+
+- `computer-use-<version>-macos-arm64.pkg`: install this on the host Mac.
+- `computer-use-guest-kit-<version>-macos-arm64.pkg`: use this only when
+  building or repairing a macOS guest image.
+- `*.tar.gz`: raw payload archives for advanced packaging workflows.
+
+Normal users should not install the guest kit inside every guest. They should
+run against a prepared authorized image.
+
+## Build From Source
+
+```bash
+swift build
+swift test
+swift run computer-use --help
+```
+
+## Documentation
+
+- [Usage](docs/usage.md): command reference and normal workflows.
+- [Guest Image](docs/guest-image.md): build the prepared macOS guest image.
+- [Releasing](docs/releasing.md): signed and notarized release packages.
+- [Development](docs/development.md): local development and validation.
+- [Architecture](docs/architecture.md): technical design.
