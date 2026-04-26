@@ -23,7 +23,7 @@ public struct SessionAgentConfiguration: Codable, Equatable, Sendable {
     }
 
     public static let guestDefault = SessionAgentConfiguration(
-        bundleIdentifier: "io.github.jianliang00.computer-use.agent",
+        bundleIdentifier: "com.jianliang00.computer-use-cli",
         bundlePath: "/Applications/ComputerUseAgent.app",
         launchAgentLabel: "io.github.jianliang00.computer-use.agent",
         host: "127.0.0.1",

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-release}"
 APP_DIR="${1:-"$ROOT_DIR/.build/ComputerUseAgent.app"}"
 EXECUTABLE_NAME="computer-use-agent"
-BUNDLE_ID="io.github.jianliang00.computer-use.agent"
+BUNDLE_ID="${MACOS_APP_BUNDLE_ID:-com.jianliang00.computer-use-cli}"
 APP_VERSION="${APP_VERSION:-0.1.0}"
 APP_BUILD="${APP_BUILD:-1}"
 

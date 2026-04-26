@@ -39,7 +39,7 @@
 - `set-value` 与 `action` 已通过 snapshot cache 接入 AX 元素执行
 - `bootstrap-agent` 可刷新并持久化 bootstrap status JSON
 - 已提供 bootstrap LaunchDaemon 与 session LaunchAgent plist 模板
-- 已提供 `ComputerUseAgent.app` 打包脚本，并验证 bundle id 为 `io.github.jianliang00.computer-use.agent`
+- 已提供 `ComputerUseAgent.app` 打包脚本，并验证 bundle id 为 `com.jianliang00.computer-use-cli`
 - `scripts/smoke-local-agent-e2e.sh` 已通过本机端到端 smoke：
   - TextEdit：element click、type、Return、set-value、AXRaise action、AX tree 读回 marker
   - Finder：坐标 click、scroll、drag
@@ -185,7 +185,7 @@
   - 基础日志能力
 
   固定要求：
-  - bundle id 为 `io.github.jianliang00.computer-use.agent`
+  - bundle id 为 `com.jianliang00.computer-use-cli`
   - guest 内监听 `127.0.0.1:7777`
 
   完成标准：

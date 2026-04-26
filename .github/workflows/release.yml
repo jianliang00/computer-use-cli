@@ -48,7 +48,31 @@ jobs:
         shell: bash
         run: swift test
 
+      - name: Import Apple signing assets
+        id: apple-signing
+        env:
+          APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_CERTIFICATE_PASSWORD }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+        shell: bash
+        run: scripts/import-apple-signing-assets.sh
+
       - name: Build release artifacts
+        env:
+          MACOS_APP_BUNDLE_ID: com.jianliang00.computer-use-cli
+          MACOS_CODE_SIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_IDENTITY }}
+          MACOS_INSTALLER_SIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_IDENTITY }}
+          MACOS_CODE_SIGN_KEYCHAIN: ${{ steps.apple-signing.outputs.keychain-path }}
+          MACOS_SIGNING_ENABLED: "1"
+          MACOS_NOTARIZATION_ENABLED: "1"
+          CREATE_INSTALLER_PKGS: "1"
+          NOTARYTOOL_KEY_PATH: ${{ steps.apple-signing.outputs.notary-key-path }}
+          NOTARYTOOL_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          NOTARYTOOL_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
         shell: bash
         run: scripts/package-release-artifacts.sh "${{ steps.release.outputs.version }}" "$RUNNER_TEMP/release-artifacts"
 
@@ -66,3 +90,8 @@ jobs:
           else
             gh release create "$tag" "$artifacts_dir"/* --title "$tag" --generate-notes --repo "$GH_REPO"
           fi
+
+      - name: Clean up Apple signing keychain
+        if: ${{ always() && steps.apple-signing.outputs.keychain-path != '' }}
+        shell: bash
+        run: security delete-keychain "${{ steps.apple-signing.outputs.keychain-path }}" || true

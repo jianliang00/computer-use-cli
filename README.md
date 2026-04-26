@@ -43,7 +43,7 @@ forwarding computer-use commands to a session agent running inside the guest.
   - `computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>`
 - `computer-use-agent` starts a guest-side HTTP server on port `7777`.
 - `scripts/package-computer-use-agent-app.sh` builds `ComputerUseAgent.app`
-  with bundle id `io.github.jianliang00.computer-use.agent`.
+  with bundle id `com.jianliang00.computer-use-cli`.
 - `scripts/prepare-computer-use-image-context.sh` prepares a macOS image build
   context with the app bundle, bootstrap agent, launchd plists, installer
   scripts, and Dockerfile.
@@ -146,3 +146,18 @@ Useful runtime commands:
 Use the `runtime container --` wrapper for raw SDK operations such as image
 build, package, load, and list. It uses the same project-owned SDK root as
 `machine` commands and does not require `container` to be installed on `PATH`.
+
+## Release Signing
+
+The GitHub Actions release workflow signs the macOS executables and app bundle,
+notarizes them with Apple's notary service, staples the notary ticket where
+macOS supports it, and publishes directly installable `.pkg` artifacts:
+
+- `computer-use-<version>-macos-arm64.pkg` installs the host CLI into
+  `/usr/local/bin/computer-use`.
+- `computer-use-guest-kit-<version>-macos-arm64.pkg` installs
+  `ComputerUseAgent.app`, `bootstrap-agent`, and the launchd plists into a
+  macOS guest.
+
+See `docs/release-signing.md` for the Apple Developer certificates, App Store
+Connect API key, and GitHub Actions secrets required by the workflow.

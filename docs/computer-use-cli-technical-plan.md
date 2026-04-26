@@ -239,7 +239,7 @@ host 侧 machine metadata 固定存放在：
 固定身份如下：
 
 - session agent bundle id
-  - `io.github.jianliang00.computer-use.agent`
+  - `com.jianliang00.computer-use-cli`
 - bootstrap label
   - `io.github.jianliang00.computer-use.bootstrap`
 - session label

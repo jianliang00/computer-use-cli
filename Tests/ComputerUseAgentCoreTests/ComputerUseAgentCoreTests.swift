@@ -6,7 +6,7 @@ import Testing
 func sessionAgentDefaultsMatchTechnicalPlan() {
     let configuration = SessionAgentConfiguration.guestDefault
 
-    #expect(configuration.bundleIdentifier == "io.github.jianliang00.computer-use.agent")
+    #expect(configuration.bundleIdentifier == "com.jianliang00.computer-use-cli")
     #expect(configuration.bundlePath == "/Applications/ComputerUseAgent.app")
     #expect(configuration.launchAgentLabel == "io.github.jianliang00.computer-use.agent")
     #expect(configuration.host == "127.0.0.1")
