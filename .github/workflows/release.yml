@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to publish, for example v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${{ github.event.inputs.tag }}"
+            git fetch --tags origin
+            git checkout "refs/tags/$tag"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "expected tag in v<semver> form, got: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        shell: bash
+        run: swift test
+
+      - name: Build release artifacts
+        shell: bash
+        run: scripts/package-release-artifacts.sh "${{ steps.release.outputs.version }}" "$RUNNER_TEMP/release-artifacts"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          tag="${{ steps.release.outputs.tag }}"
+          artifacts_dir="$RUNNER_TEMP/release-artifacts"
+
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$tag" "$artifacts_dir"/* --clobber --repo "$GH_REPO"
+          else
+            gh release create "$tag" "$artifacts_dir"/* --title "$tag" --generate-notes --repo "$GH_REPO"
+          fi
