@@ -12,6 +12,11 @@ forwarding computer-use commands to a session agent running inside the guest.
   are rejected.
 - `ContainerBridge` wraps the `container` CLI for create, start, inspect, stop,
   delete, logs, and published port lookup.
+- `ContainerBridge` no longer assumes a host-level `/usr/local/bin/container`.
+  By default it bootstraps the published `jianliang00/container` SDK release into an
+  isolated project-owned root under
+  `~/Library/Application Support/computer-use-cli/container-sdk/0.0.4/` and
+  starts `container-apiserver` with that app/install root.
 - Machine lifecycle commands are implemented:
   - `computer-use machine create --name <name> --image <image> [--host-port <port>]`
   - `computer-use machine start --machine <name> [-- <command> [args...]]`
@@ -97,8 +102,46 @@ forwarding computer-use commands to a session agent running inside the guest.
 
 - The current `local/computer-use:authorized` image was traced to a stale
   `/usr/local/bin/container-macos-guest-agent` (`c6e6d2...`). Updating the same
-  stopped clone to the OpenBox-bundled guest-agent (`fee5e8...`) makes
-  `container start` succeed: both `__guest-agent-log__` and the workload pass
-  `process.start` on the first attempt. The remaining image work is repackaging
-  `local/computer-use:authorized` from a clean authorized guest with that
-  guest-agent installed.
+  stopped clone to the guest-agent from the active container SDK build
+  (`fee5e8...`) makes `container start` succeed: both `__guest-agent-log__` and
+  the workload pass `process.start` on the first attempt. The remaining image
+  work is repackaging `local/computer-use:authorized` from a clean authorized
+  guest with the project-owned container SDK guest-agent installed.
+
+## Container Runtime
+
+`computer-use-cli` owns its container runtime root. A normal user should not
+need to install or configure `container` before running this project.
+
+- Default SDK version: `0.0.4`
+- Default runtime root:
+  `~/Library/Application Support/computer-use-cli/container-sdk/0.0.4/`
+- Default app root: `<runtime-root>/app`
+- Default install root: `<runtime-root>/install`
+- Default CLI binary: `<install-root>/bin/container`
+
+The first real container command downloads
+`https://github.com/jianliang00/container/releases/download/0.0.4/container-installer-unsigned.pkg`,
+extracts it without installing into `/usr/local`, and copies the CLI, apiserver,
+plugins, sidecar, VM manager, and guest-agent into the project-owned install
+root. If another `container` apiserver is already running with a different root,
+the command fails with a root mismatch instead of reusing that runtime.
+
+Runtime overrides:
+
+- `COMPUTER_USE_CONTAINER_SDK_VERSION`
+- `COMPUTER_USE_CONTAINER_RUNTIME_ROOT`
+- `COMPUTER_USE_CONTAINER_APP_ROOT`
+- `COMPUTER_USE_CONTAINER_INSTALL_ROOT`
+- `COMPUTER_USE_CONTAINER_BIN`
+- `COMPUTER_USE_CONTAINER_SDK_PKG_URL`
+
+Useful runtime commands:
+
+- `swift run computer-use runtime info`
+- `swift run computer-use runtime bootstrap`
+- `swift run computer-use runtime container -- <container-args...>`
+
+Use the `runtime container --` wrapper for raw SDK operations such as image
+build, package, load, and list. It uses the same project-owned SDK root as
+`machine` commands and does not require `container` to be installed on `PATH`.

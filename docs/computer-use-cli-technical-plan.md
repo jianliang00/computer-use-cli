@@ -10,7 +10,7 @@
 - guest bootstrap：系统启动后的守护逻辑
 - guest session agent：运行在登录用户会话中的 UI 自动化服务
 
-本项目只实现 computer-use 能力，不重写 macOS guest runtime。guest 生命周期完全复用 [`jianliang00/container`](https://github.com/jianliang00/container)。
+本项目只实现 computer-use 能力，不重写 macOS guest runtime。guest 生命周期复用线上发布的 `container` SDK/runtime，但由本项目管理独立的 app root 与 install root；默认不依赖用户已经安装的 `/usr/local/bin/container`，也不复用其他应用的 runtime bundle。
 
 实施任务清单见 [docs/computer-use-cli-todo.md](/Users/bytedance/Code/computer-use-cli/docs/computer-use-cli-todo.md)。
 
@@ -91,6 +91,22 @@ flowchart LR
 
 ### 3.2 角色分工
 
+#### container SDK runtime
+
+负责：
+
+- 由 `computer-use-cli` 下载并解包线上发布的 `container` SDK release
+- 放置在项目独立 runtime root：
+  `~/Library/Application Support/computer-use-cli/container-sdk/<version>/`
+- 使用项目独立 app root 与 install root 启动 `container-apiserver`
+- 为 image 构建和授权镜像注入同源 `container-macos-guest-agent`
+
+不负责：
+
+- 依赖 OpenBox 或其他宿主应用的 bundle
+- 依赖用户事先安装的 `/usr/local/bin/container`
+- 在检测到其他 root 的 apiserver 已运行时静默混用
+
 #### host CLI
 
 负责：
@@ -141,7 +157,8 @@ flowchart LR
 - 只能运行 `darwin/arm64` image
 - host 运行环境为本地图形会话
 - 使用一个 guest 网络附件
-- 使用 IPv4 `--publish`
+- 优先使用 IPv4 `--publish`；当 darwin runtime 不支持 publish 时，host
+  侧通过 `container_exec` transport 访问 guest 内 agent
 
 以下能力明确不由 `container` 提供：
 
@@ -187,7 +204,8 @@ Tests/
 模块职责如下：
 
 - `ComputerUseCLI`：CLI 命令和输出
-- `ContainerBridge`：对 `ContainerKit` / `ContainerClient` 的薄封装
+- `ContainerBridge`：通过项目自带的发布版 `container` SDK CLI 管理 guest
+  生命周期
 - `AgentProtocol`：请求、响应、错误码、JSON 编解码
 - `BootstrapAgent`：LaunchDaemon 进程
 - `ComputerUseAgentApp`：登录用户会话中的 app bundle
@@ -249,7 +267,7 @@ host 侧 machine metadata 固定存放在：
 镜像分为三层：
 
 1. base image
-   - 由 `container` 现有流程准备
+   - 由项目自带的发布版 `container` SDK 流程准备
    - 提供可运行的 macOS guest 和基础用户环境
 2. product image
    - 安装 bootstrap agent、session agent、launchd plist、auto-login 配置
@@ -271,11 +289,12 @@ host 侧 machine metadata 固定存放在：
 
 固定流程如下：
 
-1. 用 `container macos prepare-base` 准备 base image
+1. 用项目 runtime wrapper 准备 base image，例如
+   `swift run computer-use runtime container -- macos prepare-base ...`
 2. 构建本项目 image：
 
 ```bash
-container build \
+swift run computer-use runtime container -- build \
   --platform darwin/arm64 \
   -f images/macos/Dockerfile \
   -t local/computer-use:product \
@@ -291,7 +310,7 @@ container build \
 5. host 侧执行：
 
 ```bash
-container commit <container-id> local/computer-use:authorized
+swift run computer-use runtime container -- commit <container-id> local/computer-use:authorized
 ```
 
 6. 之后所有 `machine create` 都使用 `local/computer-use:authorized`
@@ -636,7 +655,7 @@ computer-use action --machine devbox --snapshot snap-001 --element ax-12 --name 
 - query logs
 - resolve published host port
 
-host CLI 不直接散落调用底层 `ContainerKit` API。
+host CLI 不直接散落调用底层 `container` SDK CLI/API。
 
 ### 15.2 BootstrapAgent
 

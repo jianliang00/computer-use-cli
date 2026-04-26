@@ -13,15 +13,16 @@ Latest run: 2026-04-25.
 - Verified generated launchd plists and app `Info.plist` with `plutil -lint`.
 - Used an existing local macOS VM image directory as an APFS clone under `/tmp/computer-use-guest-validate-image`.
 - Used `/tmp/computer-use-guest-validate-seed` as the VM shared seed directory.
-- Promoted the validated clone into a stable local base image directory:
-  `~/Library/Application Support/com.jianliang.OpenBox/macos-images/local-macos-base-latest`.
+- Promoted the validated clone into a stable local base image directory under
+  the active container app root, for example
+  `$COMPUTER_USE_CONTAINER_APP_ROOT/macos-images/local-macos-base-latest`.
 - Packaged that stable base directory as `/tmp/local-macos-base-latest.oci.tar`,
   loaded it as `local/macos-base:latest`, then removed the intermediate tar and
   stable image directory to reclaim disk space.
 - Built the product image with:
 
   ```sh
-  container build --platform darwin/arm64 \
+  swift run computer-use runtime container -- build --platform darwin/arm64 \
     -f .build/computer-use-image-context/Dockerfile \
     -t local/computer-use:product \
     --progress plain \
@@ -114,11 +115,11 @@ Latest run: 2026-04-25.
 - The authorized guest directory was packaged and loaded with:
 
   ```sh
-  container macos package \
-    --input "$HOME/Library/Application Support/com.jianliang.OpenBox/container/containers/cu-product-authorize" \
+  swift run computer-use runtime container -- macos package \
+    --input "$COMPUTER_USE_CONTAINER_APP_ROOT/containers/cu-product-authorize" \
     --output /tmp/computer-use-authorized.oci.tar \
     --reference local/computer-use:authorized
-  container image load --input /tmp/computer-use-authorized.oci.tar
+  swift run computer-use runtime container -- image load --input /tmp/computer-use-authorized.oci.tar
   ```
 
 - The loaded authorized image was inspected as `local/computer-use:authorized`
@@ -182,11 +183,11 @@ Latest run: 2026-04-25.
   is validated in a live authorized guest; the remaining follow-up is
   regenerating the local `authorized` OCI artifact from a clean source image
   directory and rerunning the fresh-guest smoke.
-- If `container image load` appears idle after packaging, verify
-  `container system status` is using the OpenBox app root
-  `~/Library/Application Support/com.jianliang.OpenBox/container/`. Restarting
-  with explicit `--app-root` and `--install-root` restored image loading during
-  this run.
+- If image loading appears idle after packaging, verify
+  `swift run computer-use runtime container -- system status` is using the project-owned
+  `computer-use-cli/container-sdk/<version>/app` app root and matching
+  `install` root. A mismatched root means another container runtime is active
+  and must not be reused for this project.
 - A rebuilt `local/computer-use:authorized` was packaged from the fresh IPSW
   source image and loaded successfully as `darwin/arm64`, size `20807105778`,
   manifest digest `sha256:35df93bb3d868ddf36837834342d9a9a6c4ca3e47438f86997918eac260c8bb8`.
@@ -194,7 +195,7 @@ Latest run: 2026-04-25.
   guest-agent version baked into that image. The image contained
   `/usr/local/bin/container-macos-guest-agent` with SHA-256
   `c6e6d2d63d88f1abd09f41e09cb34ce4f44c434df2b1ffd44dd8c47d69c5e4fd`,
-  while the OpenBox runtime bundle contained
+  while the active container SDK build contained
   `fee5e8fb97bfa87d6ef23b79de195a1c72999db1ccba7673169f3d7f5174b50e`.
 - With the stale guest-agent, `container start` repeatedly issued
   `process.start` for `__guest-agent-log__` and received
@@ -203,7 +204,8 @@ Latest run: 2026-04-25.
   `SpawnedProcessSession.flushOutputAndSendExit` with
   `NSFileHandleOperationException` from `NSConcreteFileHandle.availableData`.
 - Replacing only `/usr/local/bin/container-macos-guest-agent` in the same stopped
-  clone with the OpenBox-bundled binary made `container start` succeed in 13s:
+  clone with the active container SDK guest-agent made `container start` succeed in 13s:
   `__guest-agent-log__` and the workload both passed `process.start` on attempt
   1. The remaining follow-up is to regenerate the local `authorized` image from
-  a clean authorized guest after installing the OpenBox-bundled guest-agent.
+  a clean authorized guest after installing the project-owned container SDK
+  guest-agent.

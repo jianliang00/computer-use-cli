@@ -55,8 +55,8 @@
   - `/var/run/computer-use/bootstrap-status.json` 已刷新为 `bootstrapped: true`
 - 已基于验证后的临时镜像创建稳定本地基础镜像目录，并已将其打包加载为 `local/macos-base:latest`
 - 已构建 `local/computer-use:product`：
-  - `container image inspect local/computer-use:product` 显示 `darwin/arm64`
-  - product OCI 镜像可通过 `container run -d --gui` 启动
+  - 通过项目 runtime wrapper inspect 后显示 `darwin/arm64`
+  - product OCI 镜像可通过项目 runtime wrapper 启动
   - guest 内安装文件、LaunchDaemon、LaunchAgent 均存在
   - bootstrap LaunchDaemon 已加载，`last exit code = 0`
   - `autoLoginUser` 已配置为 `admin`
@@ -128,7 +128,7 @@
 
   完成标准：
   - 有单元测试或最小集成测试覆盖 machine 生命周期主路径
-  - 上层 CLI 不直接调用散落的 `ContainerKit` / `ContainerClient`
+  - 上层 CLI 不直接调用散落的 `container` SDK CLI/API
 
 - [x] T04 实现 machine 命令
   目标：
@@ -267,7 +267,7 @@
   - auto-login 配置
 
   完成标准：
-  - `container build --platform darwin/arm64 -f images/macos/Dockerfile ...` 成功
+  - `swift run computer-use runtime container -- build --platform darwin/arm64 -f images/macos/Dockerfile ...` 成功
   - 产物镜像可启动
   - 启动后 `admin` 能自动登录
   - `ComputerUseAgent.app` 会自动启动
@@ -276,8 +276,8 @@
   - 已有 Dockerfile、installer、LaunchDaemon、LaunchAgent 和 image context 准备脚本
   - 已在克隆 guest 中验证 live install、LaunchDaemon、LaunchAgent、HTTP health 和 bootstrap status
   - 已创建稳定本地基础镜像目录，验证 guest agent 可连通，并加载为 `local/macos-base:latest`
-  - 已通过 `container build --platform darwin/arm64` 生成 `local/computer-use:product`
-  - `local/computer-use:product` 可通过 `container run -d --gui` 启动
+  - 已通过项目 runtime wrapper 生成 `local/computer-use:product`
+  - `local/computer-use:product` 可通过项目 runtime wrapper 启动
   - product guest 内 bootstrap LaunchDaemon 已加载，安装文件存在
   - 当前 runtime 对 darwin 镜像不支持 `--publish`；host-side 访问路径已改为 `container_exec`
   - 已通过真实 CLI 验证 product machine 可启动，metadata 会记录 `agentTransport: "container_exec"`
@@ -299,7 +299,8 @@
      - Accessibility
      - Screen Recording
   3. 验证 agent 可用
-  4. 执行 `container macos package` 并 `container image load`
+  4. 执行 `swift run computer-use runtime container -- macos package` 并通过
+     `swift run computer-use runtime container -- image load` 加载
 
   完成标准：
   - `authorized image` 可重复用于创建新 guest
@@ -325,10 +326,13 @@
     guest 日志显示 sidecar 发 `process.start` 后 agent 在
     `SpawnedProcessSession.flushOutputAndSendExit` 中因
     `NSFileHandleOperationException` 崩溃并重启
-  - 同一份 stopped clone 仅替换为 OpenBox bundle 内的新 guest-agent
+  - 同一份 stopped clone 仅替换为当前 active container SDK build 内的新 guest-agent
     `fee5e8...` 后，`container start` 在 13s 内成功，
     `__guest-agent-log__` 和 workload 都在第 1 次 `process.start` 成功
-  - 剩余动作：从干净 authorized guest 重新安装 OpenBox bundle 的
+  - 设计修正：项目必须像独立应用一样管理自己的 container app root 与
+    install root，直接使用线上发布的 container SDK，不依赖用户已有的
+    `/usr/local/bin/container`，也不复用 OpenBox runtime bundle
+  - 剩余动作：从干净 authorized guest 重新安装项目独立 container SDK 的
     guest-agent 后重新打包 `local/computer-use:authorized`
 
 - [x] T12 实现 `agent ping` 与 `agent doctor`

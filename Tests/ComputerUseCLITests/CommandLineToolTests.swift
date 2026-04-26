@@ -242,6 +242,64 @@ func agentCommandsUseContainerExecURLForDarwinSandboxesWithoutPublishedPorts() t
 }
 
 @Test
+func runtimeInfoReportsProjectOwnedContainerSDKRoot() throws {
+    let root = URL(fileURLWithPath: "/tmp/computer-use-runtime-test")
+    let layout = ContainerRuntimeLayout(version: "1.2.3", root: root)
+    let tool = CommandLineTool(
+        containerBridge: StubContainerBridge(),
+        containerRuntimeLayout: layout,
+        containerRuntimeBootstrapper: NoopContainerRuntimeBootstrapper(),
+        runtimeContainerRunner: RecordingContainerCommandRunner()
+    )
+
+    let output = try tool.run(arguments: ["runtime", "info"])
+
+    #expect(output.contains("\"version\" : \"1.2.3\""))
+    #expect(output.contains("\"root\" : \"/tmp/computer-use-runtime-test\""))
+    #expect(output.contains("\"app_root\" : \"/tmp/computer-use-runtime-test/app\""))
+    #expect(output.contains("\"install_root\" : \"/tmp/computer-use-runtime-test/install\""))
+    #expect(output.contains("\"executable\" : \"/tmp/computer-use-runtime-test/install/bin/container\""))
+    #expect(output.contains("\"release_package_url\" : \"https://github.com/jianliang00/container/releases/download/1.2.3/container-installer-unsigned.pkg\""))
+    #expect(!output.contains("/usr/local/bin/container"))
+}
+
+@Test
+func runtimeBootstrapUsesConfiguredBootstrapper() throws {
+    let layout = ContainerRuntimeLayout(version: "1.2.3", root: URL(fileURLWithPath: "/tmp/cu-runtime-bootstrap"))
+    let bootstrapper = RecordingContainerRuntimeBootstrapper()
+    let tool = CommandLineTool(
+        containerBridge: StubContainerBridge(),
+        containerRuntimeLayout: layout,
+        containerRuntimeBootstrapper: bootstrapper,
+        runtimeContainerRunner: RecordingContainerCommandRunner()
+    )
+
+    let output = try tool.run(arguments: ["runtime", "bootstrap"])
+
+    #expect(output.contains("\"bootstrapped\" : true"))
+    #expect(bootstrapper.preparedLayouts == [layout])
+}
+
+@Test
+func runtimeContainerCommandUsesConfiguredRunner() throws {
+    let runner = RecordingContainerCommandRunner(result: CommandExecutionResult(
+        exitCode: 0,
+        stdout: "images ok",
+        stderr: ""
+    ))
+    let tool = CommandLineTool(
+        containerBridge: StubContainerBridge(),
+        containerRuntimeBootstrapper: NoopContainerRuntimeBootstrapper(),
+        runtimeContainerRunner: runner
+    )
+
+    let output = try tool.run(arguments: ["runtime", "container", "--", "image", "list"])
+
+    #expect(output == "images ok")
+    #expect(runner.arguments == [["image", "list"]])
+}
+
+@Test
 func machineInspectRepairsMetadataWhenSandboxAlreadyExists() throws {
     let homeDirectory = try temporaryDirectory()
     let bridge = ExistingSandboxBridge()
@@ -320,6 +378,28 @@ private func temporaryDirectory() throws -> URL {
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
     try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
     return base
+}
+
+private final class RecordingContainerRuntimeBootstrapper: ContainerRuntimeBootstrapping, @unchecked Sendable {
+    private(set) var preparedLayouts: [ContainerRuntimeLayout] = []
+
+    func prepareRuntime(layout: ContainerRuntimeLayout) throws {
+        preparedLayouts.append(layout)
+    }
+}
+
+private final class RecordingContainerCommandRunner: ContainerCommandRunning, @unchecked Sendable {
+    private(set) var arguments: [[String]] = []
+    private let result: CommandExecutionResult
+
+    init(result: CommandExecutionResult = CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")) {
+        self.result = result
+    }
+
+    func run(arguments: [String]) throws -> CommandExecutionResult {
+        self.arguments.append(arguments)
+        return result
+    }
 }
 
 private final class StubContainerBridge: ContainerRuntimeBridging, @unchecked Sendable {

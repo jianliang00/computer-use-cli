@@ -15,6 +15,41 @@ func unavailableBridgeThrowsForInspect() throws {
 }
 
 @Test
+func containerRuntimeLayoutDefaultsToProjectOwnedRoot() throws {
+    let home = URL(fileURLWithPath: "/tmp/computer-use-home")
+    let layout = ContainerRuntimeLayout.default(homeDirectory: home, environment: [:])
+
+    #expect(layout.version == "0.0.4")
+    #expect(layout.root.path == "/tmp/computer-use-home/Library/Application Support/computer-use-cli/container-sdk/0.0.4")
+    #expect(layout.appRoot.path == "/tmp/computer-use-home/Library/Application Support/computer-use-cli/container-sdk/0.0.4/app")
+    #expect(layout.installRoot.path == "/tmp/computer-use-home/Library/Application Support/computer-use-cli/container-sdk/0.0.4/install")
+    #expect(layout.executableURL.path == "/tmp/computer-use-home/Library/Application Support/computer-use-cli/container-sdk/0.0.4/install/bin/container")
+    #expect(layout.executableURL.path != "/usr/local/bin/container")
+}
+
+@Test
+func containerRuntimeLayoutHonorsEnvironmentOverrides() throws {
+    let layout = ContainerRuntimeLayout.default(
+        homeDirectory: URL(fileURLWithPath: "/tmp/ignored-home"),
+        environment: [
+            "COMPUTER_USE_CONTAINER_SDK_VERSION": "9.9.9",
+            "COMPUTER_USE_CONTAINER_RUNTIME_ROOT": "/tmp/cu-runtime",
+            "COMPUTER_USE_CONTAINER_APP_ROOT": "/tmp/cu-app",
+            "COMPUTER_USE_CONTAINER_INSTALL_ROOT": "/tmp/cu-install",
+            "COMPUTER_USE_CONTAINER_BIN": "/tmp/cu-install/bin/container",
+            "COMPUTER_USE_CONTAINER_SDK_PKG_URL": "https://example.com/container.pkg",
+        ]
+    )
+
+    #expect(layout.version == "9.9.9")
+    #expect(layout.root.path == "/tmp/cu-runtime")
+    #expect(layout.appRoot.path == "/tmp/cu-app")
+    #expect(layout.installRoot.path == "/tmp/cu-install")
+    #expect(layout.executableURL.path == "/tmp/cu-install/bin/container")
+    #expect(layout.releasePackageURL.absoluteString == "https://example.com/container.pkg")
+}
+
+@Test
 func containerCLIBridgeParsesInspectPayloadAndLogs() throws {
     let runner = QueueContainerCommandRunner(steps: [
         .success(

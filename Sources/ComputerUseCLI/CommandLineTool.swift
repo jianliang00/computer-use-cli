@@ -5,24 +5,38 @@ import Foundation
 public struct CommandLineTool {
     private let machineService: MachineService
     private let agentClient: any AgentClienting
+    private let containerRuntimeLayout: ContainerRuntimeLayout
+    private let containerRuntimeBootstrapper: any ContainerRuntimeBootstrapping
+    private let runtimeContainerRunner: any ContainerCommandRunning
 
     public init(
         fileManager: FileManager = .default,
         homeDirectory: URL? = nil,
         now: @escaping @Sendable () -> Date = Date.init,
-        containerBridge: any ContainerRuntimeBridging = ContainerCLIBridge(),
-        agentClient: any AgentClienting = AgentHTTPClient()
+        containerBridge: (any ContainerRuntimeBridging)? = nil,
+        agentClient: any AgentClienting = AgentHTTPClient(),
+        containerRuntimeLayout: ContainerRuntimeLayout = .default(),
+        containerRuntimeBootstrapper: any ContainerRuntimeBootstrapping = PublishedContainerRuntimeBootstrapper(),
+        runtimeContainerRunner: (any ContainerCommandRunning)? = nil
     ) {
+        let runner = runtimeContainerRunner ?? ProcessContainerCommandRunner(
+            layout: containerRuntimeLayout,
+            bootstrapper: containerRuntimeBootstrapper
+        )
+        let bridge = containerBridge ?? ContainerCLIBridge(runner: runner)
         let store = MachineMetadataStore(
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
         self.machineService = MachineService(
             store: store,
-            containerBridge: containerBridge,
+            containerBridge: bridge,
             now: now
         )
         self.agentClient = agentClient
+        self.containerRuntimeLayout = containerRuntimeLayout
+        self.containerRuntimeBootstrapper = containerRuntimeBootstrapper
+        self.runtimeContainerRunner = runner
     }
 
     public func run(arguments: [String]) throws -> String {
@@ -33,6 +47,8 @@ public struct CommandLineTool {
         switch command {
         case "machine":
             return try handleMachine(arguments: Array(arguments.dropFirst()))
+        case "runtime":
+            return try handleRuntime(arguments: Array(arguments.dropFirst()))
         case "agent":
             return try handleAgent(arguments: Array(arguments.dropFirst()))
         case "permissions":
@@ -47,6 +63,41 @@ public struct CommandLineTool {
             return usage()
         default:
             throw CLIError.unknownCommand(command)
+        }
+    }
+
+    private func handleRuntime(arguments: [String]) throws -> String {
+        guard let subcommand = arguments.first else {
+            throw CLIError.missingSubcommand("runtime")
+        }
+
+        switch subcommand {
+        case "info":
+            return try JSONOutput.render(ContainerRuntimeReport(
+                layout: containerRuntimeLayout,
+                bootstrapped: nil
+            ))
+        case "bootstrap":
+            try containerRuntimeBootstrapper.prepareRuntime(layout: containerRuntimeLayout)
+            return try JSONOutput.render(ContainerRuntimeReport(
+                layout: containerRuntimeLayout,
+                bootstrapped: true
+            ))
+        case "container":
+            var containerArguments = Array(arguments.dropFirst())
+            if containerArguments.first == "--" {
+                containerArguments.removeFirst()
+            }
+            guard containerArguments.isEmpty == false else {
+                throw CLIError.missingValue("container arguments")
+            }
+
+            let result = try runtimeContainerRunner.run(arguments: containerArguments)
+            return [result.stdout, result.stderr]
+                .filter { $0.isEmpty == false }
+                .joined(separator: "\n")
+        default:
+            throw CLIError.unknownSubcommand("runtime", subcommand)
         }
     }
 
@@ -372,6 +423,9 @@ public struct CommandLineTool {
           computer-use machine list
           computer-use machine logs --machine <name>
           computer-use machine rm --machine <name>
+          computer-use runtime info
+          computer-use runtime bootstrap
+          computer-use runtime container -- <container-args...>
           computer-use agent ping --machine <name>
           computer-use agent doctor --machine <name>
           computer-use permissions get --machine <name>
@@ -386,6 +440,36 @@ public struct CommandLineTool {
           computer-use action set-value --machine <name> --snapshot-id <id> --element-id <id> --value <value>
           computer-use action action --machine <name> --snapshot-id <id> --element-id <id> --name <AXAction>
         """
+    }
+}
+
+public struct ContainerRuntimeReport: Encodable, Equatable, Sendable {
+    public let version: String
+    public let root: String
+    public let appRoot: String
+    public let installRoot: String
+    public let executable: String
+    public let releasePackageURL: String
+    public let bootstrapped: Bool?
+
+    public init(layout: ContainerRuntimeLayout, bootstrapped: Bool?) {
+        self.version = layout.version
+        self.root = layout.root.path
+        self.appRoot = layout.appRoot.path
+        self.installRoot = layout.installRoot.path
+        self.executable = layout.executableURL.path
+        self.releasePackageURL = layout.releasePackageURL.absoluteString
+        self.bootstrapped = bootstrapped
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case root
+        case appRoot = "app_root"
+        case installRoot = "install_root"
+        case executable
+        case releasePackageURL = "release_package_url"
+        case bootstrapped
     }
 }
 
