@@ -66,6 +66,12 @@ computer-use machine create --name demo --image local/computer-use:authorized
 computer-use machine start --machine demo
 ```
 
+`machine start --machine demo -- <command> [args...]` keeps the existing
+first-start behavior of passing the command to the sandbox as its init process
+when the sandbox has not been created yet. If the sandbox already exists,
+including when it is already running, the CLI now starts or confirms the
+sandbox and then runs the command inside it with `container exec`.
+
 Inspect and manage it:
 
 ```bash

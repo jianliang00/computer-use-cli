@@ -91,21 +91,29 @@ public struct MachineService {
         let metadata = try store.metadata(named: name)
 
         let details: SandboxDetails
+        let shouldRunCommandAfterStart: Bool
         if let sandboxID = metadata.sandboxID {
             let current = try containerBridge.inspectSandbox(id: sandboxID)
             if current.status == .running {
                 let updated = metadata.updating(from: current, updatedAt: now())
                 try store.update(updated)
+                try runCommandIfNeeded(
+                    initProcessArguments,
+                    inSandbox: current.sandboxID
+                )
                 return updated
             }
 
             details = try containerBridge.startSandbox(id: sandboxID)
+            shouldRunCommandAfterStart = true
         } else {
             let created: SandboxDetails
             do {
                 created = try containerBridge.inspectSandbox(id: metadata.name)
+                shouldRunCommandAfterStart = true
             } catch let error as ContainerBridgeError {
                 if error == .sandboxNotFound(metadata.name) {
+                    shouldRunCommandAfterStart = false
                     created = try containerBridge.createSandbox(
                         configuration: SandboxConfiguration(
                             name: metadata.name,
@@ -123,6 +131,12 @@ public struct MachineService {
             try store.update(createdMetadata)
 
             if created.status == .running {
+                if shouldRunCommandAfterStart {
+                    try runCommandIfNeeded(
+                        initProcessArguments,
+                        inSandbox: created.sandboxID
+                    )
+                }
                 return createdMetadata
             } else {
                 details = try containerBridge.startSandbox(id: created.sandboxID)
@@ -131,7 +145,27 @@ public struct MachineService {
 
         let updated = metadata.updating(from: details, updatedAt: now())
         try store.update(updated)
+        if shouldRunCommandAfterStart {
+            try runCommandIfNeeded(
+                initProcessArguments,
+                inSandbox: details.sandboxID
+            )
+        }
         return updated
+    }
+
+    private func runCommandIfNeeded(
+        _ arguments: [String],
+        inSandbox sandboxID: String
+    ) throws {
+        guard arguments.isEmpty == false else {
+            return
+        }
+
+        _ = try containerBridge.runCommand(
+            inSandbox: sandboxID,
+            arguments: arguments
+        )
     }
 
     public func stop(name: String) throws -> MachineMetadata {

@@ -121,6 +121,10 @@ func containerCLIBridgeBuildsExpectedLifecycleCommands() throws {
             )
         ),
         .success(
+            arguments: ["exec", "demo", "/usr/bin/open", "-a", "Freeform"],
+            result: CommandExecutionResult(exitCode: 0, stdout: "opened", stderr: "")
+        ),
+        .success(
             arguments: ["stop", "demo"],
             result: CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
         ),
@@ -148,6 +152,12 @@ func containerCLIBridgeBuildsExpectedLifecycleCommands() throws {
 
     let started = try bridge.startSandbox(id: "demo")
     #expect(started.status == .running)
+
+    let commandResult = try bridge.runCommand(
+        inSandbox: "demo",
+        arguments: ["/usr/bin/open", "-a", "Freeform"]
+    )
+    #expect(commandResult.stdout == "opened")
 
     let stopped = try bridge.stopSandbox(id: "demo")
     #expect(stopped.status == .stopped)

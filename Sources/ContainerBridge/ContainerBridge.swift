@@ -108,6 +108,7 @@ public protocol ContainerRuntimeBridging: Sendable {
     func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails
     func startSandbox(id: String) throws -> SandboxDetails
     func inspectSandbox(id: String) throws -> SandboxDetails
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult
     func stopSandbox(id: String) throws -> SandboxDetails
     func removeSandbox(id: String) throws
     func queryLogs(id: String) throws -> SandboxLogs
@@ -200,6 +201,10 @@ public struct ContainerCLIBridge: ContainerRuntimeBridging {
         return try SandboxDetails(payload: payload)
     }
 
+    public func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        try runner.run(arguments: ["exec", id] + arguments)
+    }
+
     public func stopSandbox(id: String) throws -> SandboxDetails {
         _ = try runner.run(arguments: ["stop", id])
         return try inspectSandbox(id: id)
@@ -250,6 +255,10 @@ public struct UnavailableContainerBridge: ContainerRuntimeBridging {
 
     public func inspectSandbox(id: String) throws -> SandboxDetails {
         throw ContainerBridgeError.notImplemented("inspectSandbox")
+    }
+
+    public func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        throw ContainerBridgeError.notImplemented("runCommand")
     }
 
     public func stopSandbox(id: String) throws -> SandboxDetails {

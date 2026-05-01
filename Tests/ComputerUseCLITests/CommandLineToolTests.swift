@@ -151,6 +151,7 @@ func machineLifecycleCommandsUseTheBridge() throws {
     #expect(started.contains("\"sandboxID\" : \"demo\""))
     #expect(started.contains("\"status\" : \"running\""))
     #expect(bridge.createdConfigurations.first?.initProcessArguments == ["tail", "-f", "/dev/null"])
+    #expect(bridge.executedCommands.isEmpty)
 
     let logs = try tool.run(arguments: [
         "machine",
@@ -172,6 +173,85 @@ func machineLifecycleCommandsUseTheBridge() throws {
         "--machine", "demo",
     ])
     #expect(removed == "removed demo")
+}
+
+@Test
+func machineStartExecutesPassthroughCommandWhenSandboxIsAlreadyRunning() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = StubContainerBridge()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_225) },
+        containerBridge: bridge
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    let started = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+        "--",
+        "/usr/bin/open",
+        "-a",
+        "Freeform",
+    ])
+
+    #expect(started.contains("\"status\" : \"running\""))
+    #expect(bridge.executedCommands == [
+        SandboxCommandInvocation(
+            sandboxID: "demo",
+            arguments: ["/usr/bin/open", "-a", "Freeform"]
+        ),
+    ])
+}
+
+@Test
+func machineStartExecutesPassthroughCommandWhenSandboxAlreadyExistsButMetadataDoesNotPointToIt() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = ExistingSandboxBridge()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_235) },
+        containerBridge: bridge
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+
+    let started = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+        "--",
+        "/usr/bin/open",
+        "-a",
+        "Freeform",
+    ])
+
+    #expect(started.contains("\"status\" : \"running\""))
+    #expect(bridge.executedCommands == [
+        SandboxCommandInvocation(
+            sandboxID: "demo",
+            arguments: ["/usr/bin/open", "-a", "Freeform"]
+        ),
+    ])
 }
 
 @Test
@@ -632,9 +712,15 @@ private final class RuntimeRestartConfirmationRecorder: @unchecked Sendable {
     }
 }
 
+private struct SandboxCommandInvocation: Equatable {
+    let sandboxID: String
+    let arguments: [String]
+}
+
 private final class StubContainerBridge: ContainerRuntimeBridging, @unchecked Sendable {
     private var states: [String: SandboxDetails.Status] = [:]
     private(set) var createdConfigurations: [SandboxConfiguration] = []
+    private(set) var executedCommands: [SandboxCommandInvocation] = []
 
     func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
         createdConfigurations.append(configuration)
@@ -659,6 +745,14 @@ private final class StubContainerBridge: ContainerRuntimeBridging, @unchecked Se
         }
 
         return details(for: id, status: state)
+    }
+
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        executedCommands.append(SandboxCommandInvocation(
+            sandboxID: id,
+            arguments: arguments
+        ))
+        return CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
     }
 
     func stopSandbox(id: String) throws -> SandboxDetails {
@@ -699,6 +793,7 @@ private final class RootMismatchUntilRestartBridge: ContainerRuntimeBridging, @u
     private let restartState: RuntimeRestartState
     private var states: [String: SandboxDetails.Status] = [:]
     private(set) var createdConfigurations: [SandboxConfiguration] = []
+    private(set) var executedCommands: [SandboxCommandInvocation] = []
 
     init(restartState: RuntimeRestartState) {
         self.restartState = restartState
@@ -724,6 +819,15 @@ private final class RootMismatchUntilRestartBridge: ContainerRuntimeBridging, @u
         }
 
         return details(for: id, status: state)
+    }
+
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        try ensureRestarted()
+        executedCommands.append(SandboxCommandInvocation(
+            sandboxID: id,
+            arguments: arguments
+        ))
+        return CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
     }
 
     func stopSandbox(id: String) throws -> SandboxDetails {
@@ -874,6 +978,10 @@ private final class ContainerExecSandboxBridge: ContainerRuntimeBridging, @unche
         return details(for: id, status: state)
     }
 
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
+    }
+
     func stopSandbox(id: String) throws -> SandboxDetails {
         states[id] = .stopped
         return details(for: id, status: .stopped)
@@ -903,7 +1011,10 @@ private final class ContainerExecSandboxBridge: ContainerRuntimeBridging, @unche
     }
 }
 
-private struct ExistingSandboxBridge: ContainerRuntimeBridging {
+private final class ExistingSandboxBridge: ContainerRuntimeBridging, @unchecked Sendable {
+    private var state = SandboxDetails.Status.stopped
+    private(set) var executedCommands: [SandboxCommandInvocation] = []
+
     func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
         throw ContainerBridgeError.commandFailed(
             command: ["create"],
@@ -913,11 +1024,8 @@ private struct ExistingSandboxBridge: ContainerRuntimeBridging {
     }
 
     func startSandbox(id: String) throws -> SandboxDetails {
-        throw ContainerBridgeError.commandFailed(
-            command: ["start"],
-            exitCode: 1,
-            stderr: "start should not be called"
-        )
+        state = .running
+        return try inspectSandbox(id: id)
     }
 
     func inspectSandbox(id: String) throws -> SandboxDetails {
@@ -926,8 +1034,16 @@ private struct ExistingSandboxBridge: ContainerRuntimeBridging {
             name: id,
             imageReference: "local/computer-use:authorized",
             publishedHostPort: 46000,
-            status: .stopped
+            status: state
         )
+    }
+
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        executedCommands.append(SandboxCommandInvocation(
+            sandboxID: id,
+            arguments: arguments
+        ))
+        return CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
     }
 
     func stopSandbox(id: String) throws -> SandboxDetails {
@@ -967,6 +1083,10 @@ private final class StartFailureBridge: ContainerRuntimeBridging, @unchecked Sen
         }
 
         return details(for: id, status: .stopped)
+    }
+
+    func runCommand(inSandbox id: String, arguments: [String]) throws -> CommandExecutionResult {
+        CommandExecutionResult(exitCode: 0, stdout: "", stderr: "")
     }
 
     func stopSandbox(id: String) throws -> SandboxDetails {
