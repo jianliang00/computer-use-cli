@@ -1,0 +1,64 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Debug computer-use",
+            "target": "computer-use",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug computer-use"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Release computer-use",
+            "target": "computer-use",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release computer-use"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Debug computer-use-agent",
+            "target": "computer-use-agent",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug computer-use-agent"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Release computer-use-agent",
+            "target": "computer-use-agent",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release computer-use-agent"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Debug bootstrap-agent",
+            "target": "bootstrap-agent",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug bootstrap-agent"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:computer-use-cli}",
+            "name": "Release bootstrap-agent",
+            "target": "bootstrap-agent",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release bootstrap-agent"
+        }
+    ]
+}
