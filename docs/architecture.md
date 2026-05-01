@@ -53,7 +53,7 @@ Guest runtime integration:
 
 - Prepares the pinned guest-runtime binaries under a project-owned runtime root.
 - Starts `container-apiserver` with project-owned app and install roots.
-- Rejects root mismatches instead of silently reusing another application's
+- Prompts on root mismatches instead of silently reusing another application's
   runtime.
 - Provides a raw wrapper through `computer-use runtime container -- ...`.
 

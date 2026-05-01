@@ -1,5 +1,6 @@
 import AgentProtocol
 import ContainerBridge
+import Darwin
 import Foundation
 
 public struct CommandLineTool {
@@ -8,6 +9,8 @@ public struct CommandLineTool {
     private let containerRuntimeLayout: ContainerRuntimeLayout
     private let containerRuntimeBootstrapper: any ContainerRuntimeBootstrapping
     private let runtimeContainerRunner: any ContainerCommandRunning
+    private let runtimeSystemController: (any ContainerRuntimeSystemControlling)?
+    private let runtimeRestartConfirmation: @Sendable (ContainerBridgeError) -> Bool
 
     public init(
         fileManager: FileManager = .default,
@@ -17,7 +20,9 @@ public struct CommandLineTool {
         agentClient: any AgentClienting = AgentHTTPClient(),
         containerRuntimeLayout: ContainerRuntimeLayout = .default(),
         containerRuntimeBootstrapper: any ContainerRuntimeBootstrapping = PublishedContainerRuntimeBootstrapper(),
-        runtimeContainerRunner: (any ContainerCommandRunning)? = nil
+        runtimeContainerRunner: (any ContainerCommandRunning)? = nil,
+        runtimeSystemController: (any ContainerRuntimeSystemControlling)? = nil,
+        runtimeRestartConfirmation: @escaping @Sendable (ContainerBridgeError) -> Bool = CommandLineTool.confirmRuntimeRestartInteractively
     ) {
         let runner = runtimeContainerRunner ?? ProcessContainerCommandRunner(
             layout: containerRuntimeLayout,
@@ -37,6 +42,23 @@ public struct CommandLineTool {
         self.containerRuntimeLayout = containerRuntimeLayout
         self.containerRuntimeBootstrapper = containerRuntimeBootstrapper
         self.runtimeContainerRunner = runner
+        self.runtimeSystemController = runtimeSystemController ?? (runner as? any ContainerRuntimeSystemControlling)
+        self.runtimeRestartConfirmation = runtimeRestartConfirmation
+    }
+
+    public static func confirmRuntimeRestartInteractively(_ error: ContainerBridgeError) -> Bool {
+        guard isatty(STDIN_FILENO) == 1 else {
+            return false
+        }
+
+        writeStandardError(runtimeRestartPrompt(for: error))
+
+        guard let response = readLine(strippingNewline: true) else {
+            return false
+        }
+
+        let normalized = response.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "y" || normalized == "yes"
     }
 
     public func run(arguments: [String]) throws -> String {
@@ -121,7 +143,7 @@ public struct CommandLineTool {
             return try JSONOutput.render(metadata)
         case "start":
             let name = try flags.requiredValue(for: "--machine")
-            let metadata = try machineService.start(
+            let metadata = try startMachine(
                 name: name,
                 initProcessArguments: flags.passthroughArguments
             )
@@ -146,6 +168,32 @@ public struct CommandLineTool {
             return "removed \(name)"
         default:
             throw CLIError.unknownSubcommand("machine", subcommand)
+        }
+    }
+
+    private func startMachine(
+        name: String,
+        initProcessArguments: [String]
+    ) throws -> MachineMetadata {
+        do {
+            return try machineService.start(
+                name: name,
+                initProcessArguments: initProcessArguments
+            )
+        } catch let error as ContainerBridgeError where error.isRuntimeRootMismatch {
+            guard let runtimeSystemController else {
+                throw error
+            }
+
+            guard runtimeRestartConfirmation(error) else {
+                throw error
+            }
+
+            try runtimeSystemController.restartSystem()
+            return try machineService.start(
+                name: name,
+                initProcessArguments: initProcessArguments
+            )
         }
     }
 
@@ -503,6 +551,26 @@ public struct CommandLineTool {
           computer-use action action --machine <name> [--app <app>] ([--snapshot-id <id>] --element-index <n> | --snapshot-id <id> --element-id <id>) --name <AXAction>
         """
     }
+
+    private static func runtimeRestartPrompt(for error: ContainerBridgeError) -> String {
+        switch error {
+        case let .runtimeRootMismatch(expectedAppRoot, expectedInstallRoot, actualAppRoot, actualInstallRoot):
+            """
+            container services are already running with a different root.
+              expected app root: \(expectedAppRoot)
+              expected install root: \(expectedInstallRoot)
+              actual app root: \(actualAppRoot ?? "<unknown>")
+              actual install root: \(actualInstallRoot ?? "<unknown>")
+            Restart container services for this runtime and retry machine start? This stops currently running container services. [y/N]
+            """ + " "
+        default:
+            "Restart container services for this runtime and retry machine start? [y/N] "
+        }
+    }
+
+    private static func writeStandardError(_ message: String) {
+        FileHandle.standardError.write(Data(message.utf8))
+    }
 }
 
 public struct ContainerRuntimeReport: Encodable, Equatable, Sendable {
@@ -735,5 +803,14 @@ public enum CLIError: Error, LocalizedError, Equatable {
         case let .sandboxNotCreated(name):
             "machine \(name) does not have a created sandbox"
         }
+    }
+}
+
+private extension ContainerBridgeError {
+    var isRuntimeRootMismatch: Bool {
+        guard case .runtimeRootMismatch = self else {
+            return false
+        }
+        return true
     }
 }

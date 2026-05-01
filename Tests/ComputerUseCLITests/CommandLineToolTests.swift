@@ -427,6 +427,88 @@ func machineStartPersistsCreatedSandboxWhenStartFails() throws {
     #expect(inspected.contains("\"status\" : \"stopped\""))
 }
 
+@Test
+func machineStartRestartsRuntimeAfterConfirmedRootMismatch() throws {
+    let homeDirectory = try temporaryDirectory()
+    let restartState = RuntimeRestartState()
+    let bridge = RootMismatchUntilRestartBridge(restartState: restartState)
+    let controller = RecordingRuntimeSystemController(restartState: restartState)
+    let confirmation = RuntimeRestartConfirmationRecorder(answer: true)
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_500) },
+        containerBridge: bridge,
+        runtimeSystemController: controller,
+        runtimeRestartConfirmation: confirmation.confirm
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+
+    let started = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+        "--",
+        "tail",
+        "-f",
+        "/dev/null",
+    ])
+
+    #expect(started.contains("\"status\" : \"running\""))
+    #expect(controller.restartCount == 1)
+    #expect(confirmation.errors.count == 1)
+    #expect(bridge.createdConfigurations.first?.initProcessArguments == ["tail", "-f", "/dev/null"])
+}
+
+@Test
+func machineStartDoesNotRestartRuntimeWhenRootMismatchIsDeclined() throws {
+    let homeDirectory = try temporaryDirectory()
+    let restartState = RuntimeRestartState()
+    let bridge = RootMismatchUntilRestartBridge(restartState: restartState)
+    let controller = RecordingRuntimeSystemController(restartState: restartState)
+    let confirmation = RuntimeRestartConfirmationRecorder(answer: false)
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_600) },
+        containerBridge: bridge,
+        runtimeSystemController: controller,
+        runtimeRestartConfirmation: confirmation.confirm
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+
+    do {
+        _ = try tool.run(arguments: [
+            "machine",
+            "start",
+            "--machine", "demo",
+        ])
+        Issue.record("expected start to fail")
+    } catch let error as ContainerBridgeError {
+        #expect(error == .runtimeRootMismatch(
+            expectedAppRoot: "/expected/app",
+            expectedInstallRoot: "/expected/install",
+            actualAppRoot: "/actual/app",
+            actualInstallRoot: "/actual/install"
+        ))
+    }
+
+    #expect(controller.restartCount == 0)
+    #expect(confirmation.errors.count == 1)
+}
+
 private func temporaryDirectory() throws -> URL {
     let base = FileManager.default.temporaryDirectory
         .appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -453,6 +535,38 @@ private final class RecordingContainerCommandRunner: ContainerCommandRunning, @u
     func run(arguments: [String]) throws -> CommandExecutionResult {
         self.arguments.append(arguments)
         return result
+    }
+}
+
+private final class RuntimeRestartState: @unchecked Sendable {
+    var didRestart = false
+}
+
+private final class RecordingRuntimeSystemController: ContainerRuntimeSystemControlling, @unchecked Sendable {
+    private let restartState: RuntimeRestartState
+    private(set) var restartCount = 0
+
+    init(restartState: RuntimeRestartState) {
+        self.restartState = restartState
+    }
+
+    func restartSystem() throws {
+        restartCount += 1
+        restartState.didRestart = true
+    }
+}
+
+private final class RuntimeRestartConfirmationRecorder: @unchecked Sendable {
+    private let answer: Bool
+    private(set) var errors: [ContainerBridgeError] = []
+
+    init(answer: Bool) {
+        self.answer = answer
+    }
+
+    func confirm(_ error: ContainerBridgeError) -> Bool {
+        errors.append(error)
+        return answer
     }
 }
 
@@ -506,6 +620,77 @@ private final class StubContainerBridge: ContainerRuntimeBridging, @unchecked Se
 
     func resolvePublishedHostPort(id: String) throws -> Int {
         46000
+    }
+
+    private func details(for id: String, status: SandboxDetails.Status) -> SandboxDetails {
+        SandboxDetails(
+            sandboxID: id,
+            name: id,
+            imageReference: "local/computer-use:authorized",
+            publishedHostPort: 46000,
+            status: status
+        )
+    }
+}
+
+private final class RootMismatchUntilRestartBridge: ContainerRuntimeBridging, @unchecked Sendable {
+    private let restartState: RuntimeRestartState
+    private var states: [String: SandboxDetails.Status] = [:]
+    private(set) var createdConfigurations: [SandboxConfiguration] = []
+
+    init(restartState: RuntimeRestartState) {
+        self.restartState = restartState
+    }
+
+    func createSandbox(configuration: SandboxConfiguration) throws -> SandboxDetails {
+        try ensureRestarted()
+        createdConfigurations.append(configuration)
+        states[configuration.name] = .stopped
+        return details(for: configuration.name, status: .stopped)
+    }
+
+    func startSandbox(id: String) throws -> SandboxDetails {
+        try ensureRestarted()
+        states[id] = .running
+        return details(for: id, status: .running)
+    }
+
+    func inspectSandbox(id: String) throws -> SandboxDetails {
+        try ensureRestarted()
+        guard let state = states[id] else {
+            throw ContainerBridgeError.sandboxNotFound(id)
+        }
+
+        return details(for: id, status: state)
+    }
+
+    func stopSandbox(id: String) throws -> SandboxDetails {
+        try ensureRestarted()
+        states[id] = .stopped
+        return details(for: id, status: .stopped)
+    }
+
+    func removeSandbox(id: String) throws {
+        states.removeValue(forKey: id)
+    }
+
+    func queryLogs(id: String) throws -> SandboxLogs {
+        SandboxLogs(sandboxID: id, entries: [])
+    }
+
+    func resolvePublishedHostPort(id: String) throws -> Int {
+        46000
+    }
+
+    private func ensureRestarted() throws {
+        guard restartState.didRestart else {
+            throw ContainerBridgeError.runtimeRootMismatch(
+                expectedAppRoot: "/expected/app",
+                expectedInstallRoot: "/expected/install",
+                actualAppRoot: "/actual/app",
+                actualInstallRoot: "/actual/install"
+            )
+        }
     }
 
     private func details(for id: String, status: SandboxDetails.Status) -> SandboxDetails {

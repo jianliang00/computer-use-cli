@@ -269,7 +269,7 @@ public struct UnavailableContainerBridge: ContainerRuntimeBridging {
     }
 }
 
-public enum ContainerBridgeError: Error, LocalizedError, Equatable {
+public enum ContainerBridgeError: Error, LocalizedError, Equatable, Sendable {
     case notImplemented(String)
     case commandFailed(command: [String], exitCode: Int32, stderr: String)
     case invalidInspectPayload(String)
@@ -315,6 +315,10 @@ public protocol ContainerCommandRunning: Sendable {
     func run(arguments: [String]) throws -> CommandExecutionResult
 }
 
+public protocol ContainerRuntimeSystemControlling: Sendable {
+    func restartSystem() throws
+}
+
 public struct CommandExecutionResult: Equatable, Sendable {
     public let exitCode: Int32
     public let stdout: String
@@ -331,7 +335,7 @@ public struct CommandExecutionResult: Equatable, Sendable {
     }
 }
 
-public struct ProcessContainerCommandRunner: ContainerCommandRunning {
+public struct ProcessContainerCommandRunner: ContainerCommandRunning, ContainerRuntimeSystemControlling {
     private let layout: ContainerRuntimeLayout
     private let bootstrapper: any ContainerRuntimeBootstrapping
     private let startsSystemServices: Bool
@@ -361,6 +365,12 @@ public struct ProcessContainerCommandRunner: ContainerCommandRunning {
             try ensureSystemStarted()
         }
         return try runContainer(arguments: arguments)
+    }
+
+    public func restartSystem() throws {
+        try bootstrapper.prepareRuntime(layout: layout)
+        _ = try runContainer(arguments: ["system", "stop"])
+        try startSystem()
     }
 
     private func runContainer(arguments: [String]) throws -> CommandExecutionResult {
@@ -446,6 +456,10 @@ public struct ProcessContainerCommandRunner: ContainerCommandRunning {
             )
         }
 
+        try startSystem()
+    }
+
+    private func startSystem() throws {
         _ = try runContainer(arguments: [
             "system",
             "start",

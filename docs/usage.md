@@ -47,9 +47,11 @@ environment variables:
 - `COMPUTER_USE_CONTAINER_BIN`
 - `COMPUTER_USE_CONTAINER_SDK_PKG_URL`
 
-If `runtime container -- system status` reports a root mismatch, another
-container runtime is already running with different roots. Stop that runtime
-before using this project.
+If `machine start` finds another container runtime already running with
+different roots, it prompts before stopping those container services, starting
+the project-owned runtime, and retrying the machine start. In non-interactive
+contexts, stop the existing runtime first with `computer-use runtime container
+-- system stop`.
 
 The raw `runtime container -- ...` command is mainly for development and image
 workflows. Normal users should not need to learn or install a separate
