@@ -201,6 +201,17 @@ func sessionAgentHTTPRouterTransfersFilesInChunks() async throws {
     #expect(uploadResult.sha256 == payloadSHA256)
     #expect(try Data(contentsOf: URL(fileURLWithPath: uploadResult.path)) == payload)
 
+    let statResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/stat",
+        body: try AgentProtocolJSON.encode(FileStatRequest(path: "~/Documents/hello.txt"))
+    ))
+    #expect(statResponse.statusCode == 200)
+    let stat = try AgentProtocolJSON.decode(FileStatResponse.self, from: statResponse.body)
+    #expect(stat.kind == .file)
+    #expect(stat.bytes == Int64(payload.count))
+    #expect(stat.sha256 == payloadSHA256)
+
     let startDownloadResponse = await router.handle(SessionAgentHTTPRequest(
         method: .post,
         path: "/files/download/start",
@@ -228,6 +239,129 @@ func sessionAgentHTTPRouterTransfersFilesInChunks() async throws {
     #expect(downloadChunk.eof)
     #expect(Data(base64Encoded: downloadChunk.base64) == payload)
     #expect(downloadChunk.sha256 == payloadSHA256)
+
+    let finishDownloadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/finish",
+        body: try AgentProtocolJSON.encode(FileDownloadFinishRequest(downloadID: download.downloadID))
+    ))
+    #expect(finishDownloadResponse.statusCode == 200)
+}
+
+@Test
+func sessionAgentHTTPRouterTransfersDirectoriesAsArchives() async throws {
+    let guestHome = try routerTemporaryDirectory()
+    let guestTemporaryDirectory = try routerTemporaryDirectory()
+    let sourceDirectory = try routerTemporaryDirectory()
+    let extractDirectory = try routerTemporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: guestHome)
+        try? FileManager.default.removeItem(at: guestTemporaryDirectory)
+        try? FileManager.default.removeItem(at: sourceDirectory)
+        try? FileManager.default.removeItem(at: extractDirectory)
+    }
+
+    let nestedDirectory = sourceDirectory.appendingPathComponent("Nested", isDirectory: true)
+    try FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+    try Data("directory payload".utf8).write(to: nestedDirectory.appendingPathComponent("payload.txt"))
+
+    let archiveURL = sourceDirectory.deletingLastPathComponent()
+        .appendingPathComponent("\(UUID().uuidString).tar.gz")
+    defer {
+        try? FileManager.default.removeItem(at: archiveURL)
+    }
+    try runTar(arguments: [
+        "-C", sourceDirectory.path,
+        "-czf", archiveURL.path,
+        ".",
+    ])
+    let archiveData = try Data(contentsOf: archiveURL)
+
+    let router = SessionAgentHTTPRouter(
+        agent: StubSessionAgent(),
+        fileTransferHomeDirectory: guestHome,
+        fileTransferTemporaryDirectory: guestTemporaryDirectory
+    )
+
+    let startUploadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/start",
+        body: try AgentProtocolJSON.encode(FileUploadStartRequest(
+            path: "~/Imported",
+            expectedBytes: Int64(archiveData.count),
+            sha256: sha256Hex(archiveData),
+            archiveFormat: .tarGzip
+        ))
+    ))
+    #expect(startUploadResponse.statusCode == 200)
+    let upload = try AgentProtocolJSON.decode(FileUploadStartResponse.self, from: startUploadResponse.body)
+
+    let chunkResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/chunk",
+        body: try AgentProtocolJSON.encode(FileUploadChunkRequest(
+            uploadID: upload.uploadID,
+            offset: 0,
+            base64: archiveData.base64EncodedString(),
+            sha256: sha256Hex(archiveData)
+        ))
+    ))
+    #expect(chunkResponse.statusCode == 200)
+
+    let finishUploadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/finish",
+        body: try AgentProtocolJSON.encode(FileUploadFinishRequest(uploadID: upload.uploadID))
+    ))
+    #expect(finishUploadResponse.statusCode == 200)
+    let importedPayload = guestHome
+        .appendingPathComponent("Imported/Nested/payload.txt")
+    #expect(try String(contentsOf: importedPayload, encoding: .utf8) == "directory payload")
+
+    let statResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/stat",
+        body: try AgentProtocolJSON.encode(FileStatRequest(path: "~/Imported"))
+    ))
+    #expect(statResponse.statusCode == 200)
+    let stat = try AgentProtocolJSON.decode(FileStatResponse.self, from: statResponse.body)
+    #expect(stat.kind == .directory)
+
+    let startDownloadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/start",
+        body: try AgentProtocolJSON.encode(FileDownloadStartRequest(
+            path: "~/Imported",
+            archiveFormat: .tarGzip
+        ))
+    ))
+    #expect(startDownloadResponse.statusCode == 200)
+    let download = try AgentProtocolJSON.decode(FileDownloadStartResponse.self, from: startDownloadResponse.body)
+
+    let downloadChunkResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/chunk",
+        body: try AgentProtocolJSON.encode(FileDownloadChunkRequest(
+            downloadID: download.downloadID,
+            offset: 0,
+            length: Int(download.bytes)
+        ))
+    ))
+    #expect(downloadChunkResponse.statusCode == 200)
+    let downloadedChunk = try AgentProtocolJSON.decode(
+        FileDownloadChunkResponse.self,
+        from: downloadChunkResponse.body
+    )
+    let downloadedArchiveURL = extractDirectory.appendingPathComponent("downloaded.tar.gz")
+    try Data(base64Encoded: downloadedChunk.base64)?.write(to: downloadedArchiveURL)
+    try runTar(arguments: [
+        "-xzf", downloadedArchiveURL.path,
+        "-C", extractDirectory.path,
+    ])
+    #expect(try String(
+        contentsOf: extractDirectory.appendingPathComponent("Nested/payload.txt"),
+        encoding: .utf8
+    ) == "directory payload")
 
     let finishDownloadResponse = await router.handle(SessionAgentHTTPRequest(
         method: .post,
@@ -269,6 +403,15 @@ private func sha256Hex(_ data: Data) -> String {
     SHA256.hash(data: data)
         .map { String(format: "%02x", $0) }
         .joined()
+}
+
+private func runTar(arguments: [String]) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+    process.arguments = arguments
+    try process.run()
+    process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
 }
 
 private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendable {

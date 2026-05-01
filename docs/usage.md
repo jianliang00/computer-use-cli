@@ -106,7 +106,7 @@ and Accessibility / Screen Recording permission state.
 
 ## File Transfer
 
-Push a single host file into the guest:
+Push a host file or directory into the guest:
 
 ```bash
 computer-use files push \
@@ -115,7 +115,7 @@ computer-use files push \
   --dest ~/Desktop/notes.txt
 ```
 
-Pull a single guest file back to the host:
+Pull a guest file or directory back to the host:
 
 ```bash
 computer-use files pull \
@@ -129,10 +129,15 @@ SHA-256 at the end. The default chunk size is 64 KiB so the same command works
 with both published TCP and `container_exec` agent transports. Override it with
 `--chunk-size <bytes>` when needed.
 
+Directories are transferred as `tar.gz` archives internally. On `push`, the CLI
+detects whether `--src` is a file or directory. On `pull`, the CLI asks the
+guest agent for source path metadata before choosing the file or directory
+transfer path.
+
 By default, existing destination files are replaced and missing parent
 directories are created. Use `--overwrite false` or `--create-directories false`
 to make those cases fail instead. Guest paths may be under the guest user's home
-directory or `/tmp`; directory transfer is not supported yet.
+directory or `/tmp`.
 
 ## State And Actions
 

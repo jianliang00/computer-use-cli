@@ -20,13 +20,33 @@ final class FileTransferCoordinator: @unchecked Sendable {
         self.fileManager = fileManager
     }
 
+    func stat(_ request: FileStatRequest) throws -> FileStatResponse {
+        let url = try resolvedGuestURL(for: request.path)
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw FileTransferCoordinatorError.notFound(url.path)
+        }
+
+        if isDirectory.boolValue {
+            return FileStatResponse(path: url.path, kind: .directory)
+        }
+
+        let digest = try fileDigest(at: url)
+        return FileStatResponse(
+            path: url.path,
+            kind: .file,
+            bytes: digest.bytes,
+            sha256: digest.sha256
+        )
+    }
+
     func startUpload(_ request: FileUploadStartRequest) throws -> FileUploadStartResponse {
         guard request.expectedBytes.map({ $0 >= 0 }) ?? true else {
             throw FileTransferCoordinatorError.invalidRequest("expected_bytes must be non-negative")
         }
 
         let destinationURL = try resolvedGuestURL(for: request.path)
-        if existingDirectory(at: destinationURL) {
+        if request.archiveFormat == nil && existingDirectory(at: destinationURL) {
             throw FileTransferCoordinatorError.unsupportedDirectory(destinationURL.path)
         }
         if fileManager.fileExists(atPath: destinationURL.path), request.overwrite == false {
@@ -48,6 +68,7 @@ final class FileTransferCoordinator: @unchecked Sendable {
             expectedSHA256: request.sha256,
             overwrite: request.overwrite,
             createDirectories: request.createDirectories,
+            archiveFormat: request.archiveFormat,
             receivedBytes: 0
         )
 
@@ -138,10 +159,16 @@ final class FileTransferCoordinator: @unchecked Sendable {
                 throw FileTransferCoordinatorError.notFound(parentURL.path)
             }
 
-            if existingDirectory(at: session.destinationURL) {
-                throw FileTransferCoordinatorError.unsupportedDirectory(session.destinationURL.path)
+            switch session.archiveFormat {
+            case .none:
+                if existingDirectory(at: session.destinationURL) {
+                    throw FileTransferCoordinatorError.unsupportedDirectory(session.destinationURL.path)
+                }
+                try moveUploadedFile(session)
+            case .tarGzip:
+                try extractUploadedArchive(session)
             }
-            try moveUploadedFile(session)
+
             return FileTransferResponse(
                 path: session.destinationURL.path,
                 bytes: digest.bytes,
@@ -158,17 +185,38 @@ final class FileTransferCoordinator: @unchecked Sendable {
         guard fileManager.fileExists(atPath: sourceURL.path) else {
             throw FileTransferCoordinatorError.notFound(sourceURL.path)
         }
-        if existingDirectory(at: sourceURL) {
+
+        let sourceIsDirectory = existingDirectory(at: sourceURL)
+        let downloadURL: URL
+        let cleanupURL: URL?
+        switch request.archiveFormat {
+        case .none:
+            if sourceIsDirectory {
+                throw FileTransferCoordinatorError.unsupportedDirectory(sourceURL.path)
+            }
+            downloadURL = sourceURL
+            cleanupURL = nil
+        case .tarGzip:
+            guard sourceIsDirectory else {
+                throw FileTransferCoordinatorError.invalidRequest("archive downloads require a directory source")
+            }
+            downloadURL = try createDirectoryArchive(sourceURL)
+            cleanupURL = downloadURL
+        }
+
+        if existingDirectory(at: downloadURL) {
             throw FileTransferCoordinatorError.unsupportedDirectory(sourceURL.path)
         }
 
-        let digest = try fileDigest(at: sourceURL)
+        let digest = try fileDigest(at: downloadURL)
         let downloadID = UUID().uuidString
         let session = DownloadSession(
             id: downloadID,
-            sourceURL: sourceURL,
+            sourceURL: downloadURL,
+            publicPath: sourceURL.path,
             bytes: digest.bytes,
-            sha256: digest.sha256
+            sha256: digest.sha256,
+            cleanupURL: cleanupURL
         )
 
         lock.withLock {
@@ -229,10 +277,15 @@ final class FileTransferCoordinator: @unchecked Sendable {
     }
 
     func finishDownload(_ request: FileDownloadFinishRequest) throws -> ActionResponse {
-        try lock.withLock {
-            guard downloadSessions.removeValue(forKey: request.downloadID) != nil else {
+        let session = try lock.withLock {
+            guard let session = downloadSessions.removeValue(forKey: request.downloadID) else {
                 throw FileTransferCoordinatorError.sessionNotFound(request.downloadID)
             }
+            return session
+        }
+
+        if let cleanupURL = session.cleanupURL {
+            try? fileManager.removeItem(at: cleanupURL)
         }
 
         return ActionResponse()
@@ -315,6 +368,73 @@ final class FileTransferCoordinator: @unchecked Sendable {
         }
     }
 
+    private func extractUploadedArchive(_ session: UploadSession) throws {
+        let backupURL = session.destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(session.destinationURL.lastPathComponent).computer-use-backup-\(UUID().uuidString)")
+        let hadExistingDestination = fileManager.fileExists(atPath: session.destinationURL.path)
+
+        if hadExistingDestination {
+            guard session.overwrite else {
+                throw FileTransferCoordinatorError.destinationExists(session.destinationURL.path)
+            }
+            try fileManager.moveItem(at: session.destinationURL, to: backupURL)
+        }
+
+        do {
+            try fileManager.createDirectory(at: session.destinationURL, withIntermediateDirectories: true)
+            try runTar(arguments: [
+                "-xzf", session.tempURL.path,
+                "-C", session.destinationURL.path,
+            ])
+            try? fileManager.removeItem(at: session.tempURL)
+            if hadExistingDestination {
+                try? fileManager.removeItem(at: backupURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: session.destinationURL)
+            if hadExistingDestination {
+                try? fileManager.moveItem(at: backupURL, to: session.destinationURL)
+            }
+            throw error
+        }
+    }
+
+    private func createDirectoryArchive(_ sourceURL: URL) throws -> URL {
+        let transferDirectory = try ensureTransferDirectory()
+        let archiveURL = transferDirectory.appendingPathComponent("\(UUID().uuidString).tar.gz")
+        try runTar(arguments: [
+            "-C", sourceURL.path,
+            "-czf", archiveURL.path,
+            ".",
+        ])
+        return archiveURL
+    }
+
+    private func runTar(arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let stderr = String(
+                decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            )
+            throw FileTransferCoordinatorError.invalidRequest(
+                "tar failed with exit code \(process.terminationStatus): \(stderr)"
+            )
+        }
+    }
+
     private func fileDigest(at url: URL) throws -> FileDigest {
         let handle = try FileHandle(forReadingFrom: url)
         defer {
@@ -381,14 +501,17 @@ private struct UploadSession: Equatable {
     var expectedSHA256: String?
     var overwrite: Bool
     var createDirectories: Bool
+    var archiveFormat: FileArchiveFormat?
     var receivedBytes: Int64
 }
 
 private struct DownloadSession: Equatable {
     var id: String
     var sourceURL: URL
+    var publicPath: String
     var bytes: Int64
     var sha256: String
+    var cleanupURL: URL?
 }
 
 private struct FileDigest: Equatable {

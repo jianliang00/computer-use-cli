@@ -327,9 +327,54 @@ public struct CommandLineTool {
         createDirectories: Bool
     ) throws -> FileTransferReport {
         let sourceURL = try hostURL(from: sourcePath)
-        try requireRegularHostFile(sourceURL, flag: "--src")
+        let sourceKind = try hostItemKind(sourceURL, flag: "--src")
 
-        let digest = try fileDigest(at: sourceURL)
+        switch sourceKind {
+        case .file:
+            return try pushLocalPayload(
+                machineName: machineName,
+                payloadURL: sourceURL,
+                reportSourceURL: sourceURL,
+                destinationPath: destinationPath,
+                kind: "file",
+                archiveFormat: nil,
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            )
+        case .directory:
+            let archiveURL = try createHostDirectoryArchive(sourceURL)
+            defer {
+                try? fileManager.removeItem(at: archiveURL)
+            }
+            return try pushLocalPayload(
+                machineName: machineName,
+                payloadURL: archiveURL,
+                reportSourceURL: sourceURL,
+                destinationPath: destinationPath,
+                kind: "directory",
+                archiveFormat: .tarGzip,
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            )
+        }
+    }
+
+    private func pushLocalPayload(
+        machineName: String,
+        payloadURL: URL,
+        reportSourceURL: URL,
+        destinationPath: String,
+        kind: String,
+        archiveFormat: FileArchiveFormat?,
+        chunkSize: Int,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws -> FileTransferReport {
+        try requireRegularHostPayload(payloadURL)
+
+        let digest = try fileDigest(at: payloadURL)
         let baseURL = try agentBaseURL(forMachine: machineName)
         let upload = try agentClient.startFileUpload(
             baseURL: baseURL,
@@ -338,11 +383,12 @@ public struct CommandLineTool {
                 expectedBytes: digest.bytes,
                 sha256: digest.sha256,
                 overwrite: overwrite,
-                createDirectories: createDirectories
+                createDirectories: createDirectories,
+                archiveFormat: archiveFormat
             )
         )
 
-        let handle = try FileHandle(forReadingFrom: sourceURL)
+        let handle = try FileHandle(forReadingFrom: payloadURL)
         defer {
             try? handle.close()
         }
@@ -383,8 +429,9 @@ public struct CommandLineTool {
 
         return FileTransferReport(
             direction: "push",
+            kind: kind,
             machine: machineName,
-            source: sourceURL.path,
+            source: reportSourceURL.path,
             destination: finished.path,
             bytes: finished.bytes,
             sha256: finished.sha256,
@@ -400,6 +447,45 @@ public struct CommandLineTool {
         overwrite: Bool,
         createDirectories: Bool
     ) throws -> FileTransferReport {
+        let baseURL = try agentBaseURL(forMachine: machineName)
+        let stat = try agentClient.statFile(
+            baseURL: baseURL,
+            request: FileStatRequest(path: sourcePath)
+        )
+
+        switch stat.kind {
+        case .file:
+            return try pullRegularFile(
+                machineName: machineName,
+                baseURL: baseURL,
+                sourcePath: sourcePath,
+                destinationPath: destinationPath,
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            )
+        case .directory:
+            return try pullDirectory(
+                machineName: machineName,
+                baseURL: baseURL,
+                sourcePath: sourcePath,
+                destinationPath: destinationPath,
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            )
+        }
+    }
+
+    private func pullRegularFile(
+        machineName: String,
+        baseURL: URL,
+        sourcePath: String,
+        destinationPath: String,
+        chunkSize: Int,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws -> FileTransferReport {
         let destinationURL = try hostURL(from: destinationPath)
         try prepareHostDestination(
             destinationURL,
@@ -407,7 +493,6 @@ public struct CommandLineTool {
             createDirectories: createDirectories
         )
 
-        let baseURL = try agentBaseURL(forMachine: machineName)
         let download = try agentClient.startFileDownload(
             baseURL: baseURL,
             request: FileDownloadStartRequest(path: sourcePath)
@@ -483,6 +568,67 @@ public struct CommandLineTool {
 
         return FileTransferReport(
             direction: "pull",
+            kind: "file",
+            machine: machineName,
+            source: download.path,
+            destination: destinationURL.path,
+            bytes: download.bytes,
+            sha256: download.sha256,
+            chunks: chunks
+        )
+    }
+
+    private func pullDirectory(
+        machineName: String,
+        baseURL: URL,
+        sourcePath: String,
+        destinationPath: String,
+        chunkSize: Int,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws -> FileTransferReport {
+        let destinationURL = try hostURL(from: destinationPath)
+        try prepareHostDirectoryDestination(
+            destinationURL,
+            overwrite: overwrite,
+            createDirectories: createDirectories
+        )
+
+        let archiveURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.lastPathComponent).computer-use-\(UUID().uuidString).tar.gz")
+
+        let download = try agentClient.startFileDownload(
+            baseURL: baseURL,
+            request: FileDownloadStartRequest(path: sourcePath, archiveFormat: .tarGzip)
+        )
+
+        let chunks = try downloadRemotePayload(
+            baseURL: baseURL,
+            download: download,
+            destinationURL: archiveURL,
+            chunkSize: chunkSize
+        )
+
+        do {
+            _ = try agentClient.finishFileDownload(
+                baseURL: baseURL,
+                request: FileDownloadFinishRequest(downloadID: download.downloadID)
+            )
+            try extractHostDirectoryArchive(
+                archiveURL,
+                to: destinationURL,
+                overwrite: overwrite
+            )
+            try? fileManager.removeItem(at: archiveURL)
+        } catch {
+            try? fileManager.removeItem(at: archiveURL)
+            throw error
+        }
+
+        return FileTransferReport(
+            direction: "pull",
+            kind: "directory",
             machine: machineName,
             source: download.path,
             destination: destinationURL.path,
@@ -772,13 +918,21 @@ public struct CommandLineTool {
             .standardizedFileURL
     }
 
-    private func requireRegularHostFile(_ url: URL, flag: String) throws {
+    private func hostItemKind(_ url: URL, flag: String) throws -> FileItemKind {
         var isDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
             throw CLIError.fileTransferFailed("\(flag) does not exist: \(url.path)")
         }
-        guard isDirectory.boolValue == false else {
-            throw CLIError.fileTransferFailed("directory transfer is not supported yet: \(url.path)")
+
+        return isDirectory.boolValue ? .directory : .file
+    }
+
+    private func requireRegularHostPayload(_ url: URL) throws {
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              isDirectory.boolValue == false
+        else {
+            throw CLIError.fileTransferFailed("transfer payload is not a regular file: \(url.path)")
         }
     }
 
@@ -805,6 +959,91 @@ public struct CommandLineTool {
         }
     }
 
+    private func prepareHostDirectoryDestination(
+        _ url: URL,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws {
+        var isDirectory = ObjCBool(false)
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            guard overwrite else {
+                throw CLIError.fileTransferFailed("destination already exists: \(url.path)")
+            }
+        }
+
+        let parent = url.deletingLastPathComponent()
+        if createDirectories {
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        } else if fileManager.fileExists(atPath: parent.path) == false {
+            throw CLIError.fileTransferFailed("destination parent does not exist: \(parent.path)")
+        }
+    }
+
+    private func downloadRemotePayload(
+        baseURL: URL,
+        download: FileDownloadStartResponse,
+        destinationURL: URL,
+        chunkSize: Int
+    ) throws -> Int {
+        guard fileManager.createFile(atPath: destinationURL.path, contents: nil) else {
+            throw CLIError.fileTransferFailed("unable to create temporary destination \(destinationURL.path)")
+        }
+
+        var offset: Int64 = 0
+        var chunks = 0
+        var hasher = SHA256()
+        let handle = try FileHandle(forWritingTo: destinationURL)
+
+        do {
+            while offset < download.bytes {
+                let length = Int(min(Int64(chunkSize), download.bytes - offset))
+                let response = try agentClient.downloadFileChunk(
+                    baseURL: baseURL,
+                    request: FileDownloadChunkRequest(
+                        downloadID: download.downloadID,
+                        offset: offset,
+                        length: length
+                    )
+                )
+                guard response.offset == offset else {
+                    throw CLIError.fileTransferFailed("agent returned chunk offset \(response.offset), expected \(offset)")
+                }
+                guard let chunk = Data(base64Encoded: response.base64) else {
+                    throw CLIError.fileTransferFailed("agent returned invalid chunk base64")
+                }
+                guard Int64(chunk.count) == response.bytes else {
+                    throw CLIError.fileTransferFailed("agent returned inconsistent chunk byte count")
+                }
+                guard sha256Hex(chunk) == response.sha256 else {
+                    throw CLIError.fileTransferFailed("agent returned chunk with invalid sha256")
+                }
+
+                try handle.write(contentsOf: chunk)
+                hasher.update(data: chunk)
+                offset += Int64(chunk.count)
+                chunks += 1
+
+                if response.eof && offset < download.bytes {
+                    throw CLIError.fileTransferFailed("agent ended download before the expected byte count")
+                }
+            }
+
+            try handle.close()
+
+            let actualDigest = LocalFileDigest(bytes: offset, sha256: hex(hasher.finalize()))
+            let expectedDigest = LocalFileDigest(bytes: download.bytes, sha256: download.sha256)
+            try validateTransferDigest(
+                FileTransferResponse(path: download.path, bytes: actualDigest.bytes, sha256: actualDigest.sha256),
+                expected: expectedDigest
+            )
+            return chunks
+        } catch {
+            try? handle.close()
+            try? fileManager.removeItem(at: destinationURL)
+            throw error
+        }
+    }
+
     private func moveDownloadedFile(from tempURL: URL, to destinationURL: URL) throws {
         guard fileManager.fileExists(atPath: destinationURL.path) else {
             try fileManager.moveItem(at: tempURL, to: destinationURL)
@@ -824,6 +1063,76 @@ public struct CommandLineTool {
                 try? fileManager.moveItem(at: backupURL, to: destinationURL)
             }
             throw error
+        }
+    }
+
+    private func createHostDirectoryArchive(_ sourceURL: URL) throws -> URL {
+        let archiveURL = fileManager.temporaryDirectory
+            .appendingPathComponent("computer-use-\(UUID().uuidString).tar.gz")
+        try runHostTool(executable: "/usr/bin/tar", arguments: [
+            "-C", sourceURL.path,
+            "-czf", archiveURL.path,
+            ".",
+        ])
+        return archiveURL
+    }
+
+    private func extractHostDirectoryArchive(
+        _ archiveURL: URL,
+        to destinationURL: URL,
+        overwrite: Bool
+    ) throws {
+        let backupURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.lastPathComponent).computer-use-backup-\(UUID().uuidString)")
+        let hadExistingDestination = fileManager.fileExists(atPath: destinationURL.path)
+
+        if hadExistingDestination {
+            guard overwrite else {
+                throw CLIError.fileTransferFailed("destination already exists: \(destinationURL.path)")
+            }
+            try fileManager.moveItem(at: destinationURL, to: backupURL)
+        }
+
+        do {
+            try fileManager.createDirectory(at: destinationURL, withIntermediateDirectories: true)
+            try runHostTool(executable: "/usr/bin/tar", arguments: [
+                "-xzf", archiveURL.path,
+                "-C", destinationURL.path,
+            ])
+            if hadExistingDestination {
+                try? fileManager.removeItem(at: backupURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: destinationURL)
+            if hadExistingDestination {
+                try? fileManager.moveItem(at: backupURL, to: destinationURL)
+            }
+            throw error
+        }
+    }
+
+    private func runHostTool(executable: String, arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let stderr = String(
+                decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(),
+                as: UTF8.self
+            )
+            throw CLIError.fileTransferFailed(
+                "\(executable) exited with code \(process.terminationStatus): \(stderr)"
+            )
         }
     }
 
@@ -887,8 +1196,8 @@ public struct CommandLineTool {
           computer-use permissions request --machine <name>
           computer-use apps list --machine <name>
           computer-use state get --machine <name> [--app <name-or-bundle-id> | --bundle-id <bundle-id>]
-          computer-use files push --machine <name> --src <host-path> --dest <guest-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
-          computer-use files pull --machine <name> --src <guest-path> --dest <host-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
+          computer-use files push --machine <name> --src <host-file-or-directory> --dest <guest-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
+          computer-use files pull --machine <name> --src <guest-file-or-directory> --dest <host-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
           computer-use action click --machine <name> [--app <app>] (--x <x> --y <y> | --snapshot-id <id> --element-id <id> | [--snapshot-id <id>] --element-index <n>)
           computer-use action type --machine <name> [--app <app>] --text <text>
           computer-use action key --machine <name> [--app <app>] --key <key-or-combo>
@@ -1016,6 +1325,7 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
 
 public struct FileTransferReport: Encodable, Equatable, Sendable {
     public let direction: String
+    public let kind: String
     public let machine: String
     public let source: String
     public let destination: String
@@ -1025,6 +1335,7 @@ public struct FileTransferReport: Encodable, Equatable, Sendable {
 
     public init(
         direction: String,
+        kind: String,
         machine: String,
         source: String,
         destination: String,
@@ -1033,6 +1344,7 @@ public struct FileTransferReport: Encodable, Equatable, Sendable {
         chunks: Int
     ) {
         self.direction = direction
+        self.kind = kind
         self.machine = machine
         self.source = source
         self.destination = destination

@@ -45,6 +45,20 @@ func agentHTTPClientBuildsExpectedRequests() throws {
         ),
         .init(
             method: "POST",
+            path: "/files/stat",
+            body: #"{"path":"~/Desktop/a.txt"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileStatResponse(
+                    path: "/Users/admin/Desktop/a.txt",
+                    kind: .file,
+                    bytes: 5,
+                    sha256: "abc"
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
             path: "/files/upload/start",
             body: #"{"create_directories":true,"expected_bytes":5,"overwrite":true,"path":"~/Desktop/a.txt","sha256":"abc"}"#,
             response: AgentHTTPTransportResponse(
@@ -136,6 +150,12 @@ func agentHTTPClientBuildsExpectedRequests() throws {
         request: StateRequest(bundleID: "com.apple.TextEdit")
     )
     #expect(state.snapshotID == "snap-001")
+
+    let stat = try client.statFile(
+        baseURL: baseURL,
+        request: FileStatRequest(path: "~/Desktop/a.txt")
+    )
+    #expect(stat.kind == .file)
 
     let upload = try client.startFileUpload(
         baseURL: baseURL,

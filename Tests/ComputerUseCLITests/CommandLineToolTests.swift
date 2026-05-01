@@ -521,6 +521,86 @@ func fileCommandsTransferChunksThroughAgent() throws {
 }
 
 @Test
+func fileCommandsTransferDirectoriesAsArchives() throws {
+    let homeDirectory = try temporaryDirectory()
+    let hostDirectory = try temporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: homeDirectory)
+        try? FileManager.default.removeItem(at: hostDirectory)
+    }
+
+    let sourceDirectory = hostDirectory.appendingPathComponent("Source", isDirectory: true)
+    let nestedSourceDirectory = sourceDirectory.appendingPathComponent("Nested", isDirectory: true)
+    try FileManager.default.createDirectory(at: nestedSourceDirectory, withIntermediateDirectories: true)
+    try Data("from host".utf8).write(to: nestedSourceDirectory.appendingPathComponent("host.txt"))
+
+    let remoteDirectory = hostDirectory.appendingPathComponent("Remote", isDirectory: true)
+    try FileManager.default.createDirectory(at: remoteDirectory, withIntermediateDirectories: true)
+    try Data("from guest".utf8).write(to: remoteDirectory.appendingPathComponent("guest.txt"))
+
+    let agentClient = StubAgentClient()
+    agentClient.directoryDownloadData = try makeDirectoryArchive(from: remoteDirectory)
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_295) },
+        containerBridge: StubContainerBridge(),
+        agentClient: agentClient
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    let push = try tool.run(arguments: [
+        "files",
+        "push",
+        "--machine", "demo",
+        "--src", sourceDirectory.path,
+        "--dest", "~/Desktop/Source",
+        "--chunk-size", "2048",
+    ])
+    #expect(push.contains("\"kind\" : \"directory\""))
+    #expect(agentClient.uploadStartRequests.last?.archiveFormat == .tarGzip)
+    #expect(agentClient.uploadStartRequests.last?.path == "~/Desktop/Source")
+
+    let extractedUpload = hostDirectory.appendingPathComponent("ExtractedUpload", isDirectory: true)
+    try extractDirectoryArchive(agentClient.uploadedData, to: extractedUpload)
+    #expect(try String(
+        contentsOf: extractedUpload.appendingPathComponent("Nested/host.txt"),
+        encoding: .utf8
+    ) == "from host")
+
+    let pulledDirectory = hostDirectory.appendingPathComponent("Pulled", isDirectory: true)
+    let pull = try tool.run(arguments: [
+        "files",
+        "pull",
+        "--machine", "demo",
+        "--src", "~/Desktop/remote-dir",
+        "--dest", pulledDirectory.path,
+        "--chunk-size", "2048",
+    ])
+    #expect(pull.contains("\"kind\" : \"directory\""))
+    #expect(agentClient.statRequests.contains(FileStatRequest(path: "~/Desktop/remote-dir")))
+    #expect(agentClient.downloadStartRequests.last == FileDownloadStartRequest(
+        path: "~/Desktop/remote-dir",
+        archiveFormat: .tarGzip
+    ))
+    #expect(try String(
+        contentsOf: pulledDirectory.appendingPathComponent("guest.txt"),
+        encoding: .utf8
+    ) == "from guest")
+}
+
+@Test
 func runtimeInfoReportsProjectOwnedContainerSDKRoot() throws {
     let root = URL(fileURLWithPath: "/tmp/computer-use-runtime-test")
     let layout = ContainerRuntimeLayout(version: "1.2.3", root: root)
@@ -747,6 +827,45 @@ private func sha256Hex(_ data: Data) -> String {
         .joined()
 }
 
+private func makeDirectoryArchive(from directory: URL) throws -> Data {
+    let archiveURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(UUID().uuidString).tar.gz")
+    defer {
+        try? FileManager.default.removeItem(at: archiveURL)
+    }
+
+    try runTar(arguments: [
+        "-C", directory.path,
+        "-czf", archiveURL.path,
+        ".",
+    ])
+    return try Data(contentsOf: archiveURL)
+}
+
+private func extractDirectoryArchive(_ data: Data, to destination: URL) throws {
+    let archiveURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(UUID().uuidString).tar.gz")
+    defer {
+        try? FileManager.default.removeItem(at: archiveURL)
+    }
+
+    try data.write(to: archiveURL)
+    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+    try runTar(arguments: [
+        "-xzf", archiveURL.path,
+        "-C", destination.path,
+    ])
+}
+
+private func runTar(arguments: [String]) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+    process.arguments = arguments
+    try process.run()
+    process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
+}
+
 private final class RecordingContainerRuntimeBootstrapper: ContainerRuntimeBootstrapping, @unchecked Sendable {
     private(set) var preparedLayouts: [ContainerRuntimeLayout] = []
 
@@ -962,6 +1081,7 @@ private final class RootMismatchUntilRestartBridge: ContainerRuntimeBridging, @u
 private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     private(set) var baseURLs: [URL] = []
     private(set) var stateRequests: [StateRequest] = []
+    private(set) var statRequests: [FileStatRequest] = []
     private(set) var uploadStartRequests: [FileUploadStartRequest] = []
     private(set) var uploadChunkRequests: [FileUploadChunkRequest] = []
     private(set) var uploadFinishRequests: [FileUploadFinishRequest] = []
@@ -973,7 +1093,9 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     private(set) var keyRequests: [KeyActionRequest] = []
     private(set) var scrollRequests: [ScrollActionRequest] = []
     let downloadData = Data("guest data".utf8)
-    private var uploadedData = Data()
+    var directoryDownloadData = Data()
+    private(set) var uploadedData = Data()
+    private var activeDownloadPayloads: [String: Data] = [:]
 
     func health(baseURL: URL) throws -> HealthResponse {
         baseURLs.append(baseURL)
@@ -1014,6 +1136,21 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
         )
     }
 
+    func statFile(baseURL: URL, request: FileStatRequest) throws -> FileStatResponse {
+        baseURLs.append(baseURL)
+        statRequests.append(request)
+        if request.path.contains("remote-dir") {
+            return FileStatResponse(path: request.path, kind: .directory)
+        }
+
+        return FileStatResponse(
+            path: request.path,
+            kind: .file,
+            bytes: Int64(downloadData.count),
+            sha256: sha256Hex(downloadData)
+        )
+    }
+
     func startFileUpload(baseURL: URL, request: FileUploadStartRequest) throws -> FileUploadStartResponse {
         baseURLs.append(baseURL)
         uploadStartRequests.append(request)
@@ -1047,27 +1184,39 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     func startFileDownload(baseURL: URL, request: FileDownloadStartRequest) throws -> FileDownloadStartResponse {
         baseURLs.append(baseURL)
         downloadStartRequests.append(request)
+        let payload: Data
+        let downloadID: String
+        if request.archiveFormat == .tarGzip {
+            payload = directoryDownloadData
+            downloadID = "download-directory-001"
+        } else {
+            payload = downloadData
+            downloadID = "download-001"
+        }
+        activeDownloadPayloads[downloadID] = payload
+
         return FileDownloadStartResponse(
-            downloadID: "download-001",
+            downloadID: downloadID,
             path: request.path,
-            bytes: Int64(downloadData.count),
-            sha256: sha256Hex(downloadData)
+            bytes: Int64(payload.count),
+            sha256: sha256Hex(payload)
         )
     }
 
     func downloadFileChunk(baseURL: URL, request: FileDownloadChunkRequest) throws -> FileDownloadChunkResponse {
         baseURLs.append(baseURL)
         downloadChunkRequests.append(request)
+        let payload = activeDownloadPayloads[request.downloadID] ?? downloadData
         let start = Int(request.offset)
-        let end = min(start + request.length, downloadData.count)
-        let chunk = start < end ? downloadData.subdata(in: start..<end) : Data()
+        let end = min(start + request.length, payload.count)
+        let chunk = start < end ? payload.subdata(in: start..<end) : Data()
         return FileDownloadChunkResponse(
             downloadID: request.downloadID,
             offset: request.offset,
             base64: chunk.base64EncodedString(),
             bytes: Int64(chunk.count),
             sha256: sha256Hex(chunk),
-            eof: end >= downloadData.count
+            eof: end >= payload.count
         )
     }
 

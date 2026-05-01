@@ -70,6 +70,8 @@ public final class SessionAgentHTTPRouter: Sendable {
             case (.post, "/state"):
                 try await requireAutomationPermissions()
                 return try await state(request)
+            case (.post, "/files/stat"):
+                return try fileStat(request)
             case (.post, "/files/upload/start"):
                 return try fileUploadStart(request)
             case (.post, "/files/upload/chunk"):
@@ -205,6 +207,11 @@ public final class SessionAgentHTTPRouter: Sendable {
     private func fileUploadStart(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
         let uploadRequest = try decode(FileUploadStartRequest.self, from: request)
         return try json(fileTransfers.startUpload(uploadRequest))
+    }
+
+    private func fileStat(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let statRequest = try decode(FileStatRequest.self, from: request)
+        return try json(fileTransfers.stat(statRequest))
     }
 
     private func fileUploadChunk(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {

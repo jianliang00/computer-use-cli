@@ -110,25 +110,64 @@ public struct ActionResponse: Codable, Sendable, Equatable {
     }
 }
 
+public enum FileArchiveFormat: String, Codable, Sendable, Equatable {
+    case tarGzip = "tar_gzip"
+}
+
+public enum FileItemKind: String, Codable, Sendable, Equatable {
+    case file
+    case directory
+}
+
+public struct FileStatRequest: Codable, Sendable, Equatable {
+    public var path: String
+
+    public init(path: String) {
+        self.path = path
+    }
+}
+
+public struct FileStatResponse: Codable, Sendable, Equatable {
+    public var path: String
+    public var kind: FileItemKind
+    public var bytes: Int64?
+    public var sha256: String?
+
+    public init(
+        path: String,
+        kind: FileItemKind,
+        bytes: Int64? = nil,
+        sha256: String? = nil
+    ) {
+        self.path = path
+        self.kind = kind
+        self.bytes = bytes
+        self.sha256 = sha256
+    }
+}
+
 public struct FileUploadStartRequest: Codable, Sendable, Equatable {
     public var path: String
     public var expectedBytes: Int64?
     public var sha256: String?
     public var overwrite: Bool
     public var createDirectories: Bool
+    public var archiveFormat: FileArchiveFormat?
 
     public init(
         path: String,
         expectedBytes: Int64? = nil,
         sha256: String? = nil,
         overwrite: Bool = true,
-        createDirectories: Bool = true
+        createDirectories: Bool = true,
+        archiveFormat: FileArchiveFormat? = nil
     ) {
         self.path = path
         self.expectedBytes = expectedBytes
         self.sha256 = sha256
         self.overwrite = overwrite
         self.createDirectories = createDirectories
+        self.archiveFormat = archiveFormat
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -137,6 +176,7 @@ public struct FileUploadStartRequest: Codable, Sendable, Equatable {
         case sha256
         case overwrite
         case createDirectories = "create_directories"
+        case archiveFormat = "archive_format"
     }
 }
 
@@ -221,9 +261,16 @@ public struct FileUploadFinishRequest: Codable, Sendable, Equatable {
 
 public struct FileDownloadStartRequest: Codable, Sendable, Equatable {
     public var path: String
+    public var archiveFormat: FileArchiveFormat?
 
-    public init(path: String) {
+    public init(path: String, archiveFormat: FileArchiveFormat? = nil) {
         self.path = path
+        self.archiveFormat = archiveFormat
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path
+        case archiveFormat = "archive_format"
     }
 }
 

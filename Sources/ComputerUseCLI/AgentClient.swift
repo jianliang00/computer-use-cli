@@ -8,6 +8,7 @@ public protocol AgentClienting: Sendable {
     func requestPermissions(baseURL: URL) throws -> PermissionsResponse
     func apps(baseURL: URL) throws -> AppsResponse
     func state(baseURL: URL, request: StateRequest) throws -> StateResponse
+    func statFile(baseURL: URL, request: FileStatRequest) throws -> FileStatResponse
     func startFileUpload(baseURL: URL, request: FileUploadStartRequest) throws -> FileUploadStartResponse
     func uploadFileChunk(baseURL: URL, request: FileUploadChunkRequest) throws -> FileUploadChunkResponse
     func finishFileUpload(baseURL: URL, request: FileUploadFinishRequest) throws -> FileTransferResponse
@@ -48,6 +49,13 @@ public struct AgentHTTPClient: AgentClienting {
 
     public func state(baseURL: URL, request: StateRequest) throws -> StateResponse {
         try post("/state", baseURL: baseURL, body: request)
+    }
+
+    public func statFile(
+        baseURL: URL,
+        request: FileStatRequest
+    ) throws -> FileStatResponse {
+        try post("/files/stat", baseURL: baseURL, body: request)
     }
 
     public func startFileUpload(

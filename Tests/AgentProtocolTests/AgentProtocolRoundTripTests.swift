@@ -180,6 +180,21 @@ final class AgentProtocolRoundTripTests: XCTestCase {
 
     func testFileTransferRequestsRoundTrip() throws {
         try assertRoundTrip(
+            FileStatRequest(path: "~/Desktop/a.txt"),
+            expectedJSON: #"{"path":"~/Desktop/a.txt"}"#
+        )
+
+        try assertRoundTrip(
+            FileStatResponse(path: "/Users/admin/Desktop/a.txt", kind: .file, bytes: 11, sha256: "abc"),
+            expectedJSON: #"{"bytes":11,"kind":"file","path":"/Users/admin/Desktop/a.txt","sha256":"abc"}"#
+        )
+
+        try assertRoundTrip(
+            FileStatResponse(path: "/Users/admin/Desktop/folder", kind: .directory),
+            expectedJSON: #"{"kind":"directory","path":"/Users/admin/Desktop/folder"}"#
+        )
+
+        try assertRoundTrip(
             FileUploadStartRequest(
                 path: "~/Desktop/a.txt",
                 expectedBytes: 11,
@@ -188,6 +203,16 @@ final class AgentProtocolRoundTripTests: XCTestCase {
                 createDirectories: true
             ),
             expectedJSON: #"{"create_directories":true,"expected_bytes":11,"overwrite":false,"path":"~/Desktop/a.txt","sha256":"abc"}"#
+        )
+
+        try assertRoundTrip(
+            FileUploadStartRequest(
+                path: "~/Desktop/folder",
+                expectedBytes: 100,
+                sha256: "archive",
+                archiveFormat: .tarGzip
+            ),
+            expectedJSON: #"{"archive_format":"tar_gzip","create_directories":true,"expected_bytes":100,"overwrite":true,"path":"~/Desktop/folder","sha256":"archive"}"#
         )
 
         try assertRoundTrip(
@@ -218,6 +243,11 @@ final class AgentProtocolRoundTripTests: XCTestCase {
         try assertRoundTrip(
             FileDownloadStartRequest(path: "~/Desktop/a.txt"),
             expectedJSON: #"{"path":"~/Desktop/a.txt"}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadStartRequest(path: "~/Desktop/folder", archiveFormat: .tarGzip),
+            expectedJSON: #"{"archive_format":"tar_gzip","path":"~/Desktop/folder"}"#
         )
 
         try assertRoundTrip(
