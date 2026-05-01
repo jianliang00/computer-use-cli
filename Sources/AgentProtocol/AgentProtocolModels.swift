@@ -110,6 +110,229 @@ public struct ActionResponse: Codable, Sendable, Equatable {
     }
 }
 
+public struct FileUploadStartRequest: Codable, Sendable, Equatable {
+    public var path: String
+    public var expectedBytes: Int64?
+    public var sha256: String?
+    public var overwrite: Bool
+    public var createDirectories: Bool
+
+    public init(
+        path: String,
+        expectedBytes: Int64? = nil,
+        sha256: String? = nil,
+        overwrite: Bool = true,
+        createDirectories: Bool = true
+    ) {
+        self.path = path
+        self.expectedBytes = expectedBytes
+        self.sha256 = sha256
+        self.overwrite = overwrite
+        self.createDirectories = createDirectories
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path
+        case expectedBytes = "expected_bytes"
+        case sha256
+        case overwrite
+        case createDirectories = "create_directories"
+    }
+}
+
+public struct FileUploadStartResponse: Codable, Sendable, Equatable {
+    public var uploadID: String
+    public var path: String
+
+    public init(uploadID: String, path: String) {
+        self.uploadID = uploadID
+        self.path = path
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uploadID = "upload_id"
+        case path
+    }
+}
+
+public struct FileUploadChunkRequest: Codable, Sendable, Equatable {
+    public var uploadID: String
+    public var offset: Int64
+    public var base64: String
+    public var sha256: String?
+
+    public init(
+        uploadID: String,
+        offset: Int64,
+        base64: String,
+        sha256: String? = nil
+    ) {
+        self.uploadID = uploadID
+        self.offset = offset
+        self.base64 = base64
+        self.sha256 = sha256
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uploadID = "upload_id"
+        case offset
+        case base64
+        case sha256
+    }
+}
+
+public struct FileUploadChunkResponse: Codable, Sendable, Equatable {
+    public var uploadID: String
+    public var offset: Int64
+    public var bytes: Int64
+    public var receivedBytes: Int64
+
+    public init(
+        uploadID: String,
+        offset: Int64,
+        bytes: Int64,
+        receivedBytes: Int64
+    ) {
+        self.uploadID = uploadID
+        self.offset = offset
+        self.bytes = bytes
+        self.receivedBytes = receivedBytes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uploadID = "upload_id"
+        case offset
+        case bytes
+        case receivedBytes = "received_bytes"
+    }
+}
+
+public struct FileUploadFinishRequest: Codable, Sendable, Equatable {
+    public var uploadID: String
+
+    public init(uploadID: String) {
+        self.uploadID = uploadID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uploadID = "upload_id"
+    }
+}
+
+public struct FileDownloadStartRequest: Codable, Sendable, Equatable {
+    public var path: String
+
+    public init(path: String) {
+        self.path = path
+    }
+}
+
+public struct FileDownloadStartResponse: Codable, Sendable, Equatable {
+    public var downloadID: String
+    public var path: String
+    public var bytes: Int64
+    public var sha256: String
+
+    public init(
+        downloadID: String,
+        path: String,
+        bytes: Int64,
+        sha256: String
+    ) {
+        self.downloadID = downloadID
+        self.path = path
+        self.bytes = bytes
+        self.sha256 = sha256
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case downloadID = "download_id"
+        case path
+        case bytes
+        case sha256
+    }
+}
+
+public struct FileDownloadChunkRequest: Codable, Sendable, Equatable {
+    public var downloadID: String
+    public var offset: Int64
+    public var length: Int
+
+    public init(
+        downloadID: String,
+        offset: Int64,
+        length: Int
+    ) {
+        self.downloadID = downloadID
+        self.offset = offset
+        self.length = length
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case downloadID = "download_id"
+        case offset
+        case length
+    }
+}
+
+public struct FileDownloadChunkResponse: Codable, Sendable, Equatable {
+    public var downloadID: String
+    public var offset: Int64
+    public var base64: String
+    public var bytes: Int64
+    public var sha256: String
+    public var eof: Bool
+
+    public init(
+        downloadID: String,
+        offset: Int64,
+        base64: String,
+        bytes: Int64,
+        sha256: String,
+        eof: Bool
+    ) {
+        self.downloadID = downloadID
+        self.offset = offset
+        self.base64 = base64
+        self.bytes = bytes
+        self.sha256 = sha256
+        self.eof = eof
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case downloadID = "download_id"
+        case offset
+        case base64
+        case bytes
+        case sha256
+        case eof
+    }
+}
+
+public struct FileDownloadFinishRequest: Codable, Sendable, Equatable {
+    public var downloadID: String
+
+    public init(downloadID: String) {
+        self.downloadID = downloadID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case downloadID = "download_id"
+    }
+}
+
+public struct FileTransferResponse: Codable, Sendable, Equatable {
+    public var path: String
+    public var bytes: Int64
+    public var sha256: String
+
+    public init(path: String, bytes: Int64, sha256: String) {
+        self.path = path
+        self.bytes = bytes
+        self.sha256 = sha256
+    }
+}
+
 public struct ClickActionRequest: Codable, Sendable, Equatable {
     public enum Target: Sendable, Equatable {
         case coordinates(Point)

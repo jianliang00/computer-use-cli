@@ -104,6 +104,36 @@ computer-use permissions request --machine demo
 `agent doctor` reports sandbox state, agent transport, session-agent readiness,
 and Accessibility / Screen Recording permission state.
 
+## File Transfer
+
+Push a single host file into the guest:
+
+```bash
+computer-use files push \
+  --machine demo \
+  --src ./notes.txt \
+  --dest ~/Desktop/notes.txt
+```
+
+Pull a single guest file back to the host:
+
+```bash
+computer-use files pull \
+  --machine demo \
+  --src ~/Desktop/notes.txt \
+  --dest ./notes-from-guest.txt
+```
+
+Transfers are chunked through the guest agent and verify byte count plus
+SHA-256 at the end. The default chunk size is 64 KiB so the same command works
+with both published TCP and `container_exec` agent transports. Override it with
+`--chunk-size <bytes>` when needed.
+
+By default, existing destination files are replaced and missing parent
+directories are created. Use `--overwrite false` or `--create-directories false`
+to make those cases fail instead. Guest paths may be under the guest user's home
+directory or `/tmp`; directory transfer is not supported yet.
+
 ## State And Actions
 
 List running GUI apps:

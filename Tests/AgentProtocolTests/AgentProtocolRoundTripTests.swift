@@ -178,6 +178,86 @@ final class AgentProtocolRoundTripTests: XCTestCase {
         )
     }
 
+    func testFileTransferRequestsRoundTrip() throws {
+        try assertRoundTrip(
+            FileUploadStartRequest(
+                path: "~/Desktop/a.txt",
+                expectedBytes: 11,
+                sha256: "abc",
+                overwrite: false,
+                createDirectories: true
+            ),
+            expectedJSON: #"{"create_directories":true,"expected_bytes":11,"overwrite":false,"path":"~/Desktop/a.txt","sha256":"abc"}"#
+        )
+
+        try assertRoundTrip(
+            FileUploadStartResponse(uploadID: "up-1", path: "/Users/admin/Desktop/a.txt"),
+            expectedJSON: #"{"path":"/Users/admin/Desktop/a.txt","upload_id":"up-1"}"#
+        )
+
+        try assertRoundTrip(
+            FileUploadChunkRequest(
+                uploadID: "up-1",
+                offset: 0,
+                base64: "aGVsbG8=",
+                sha256: "def"
+            ),
+            expectedJSON: #"{"base64":"aGVsbG8=","offset":0,"sha256":"def","upload_id":"up-1"}"#
+        )
+
+        try assertRoundTrip(
+            FileUploadChunkResponse(uploadID: "up-1", offset: 0, bytes: 5, receivedBytes: 5),
+            expectedJSON: #"{"bytes":5,"offset":0,"received_bytes":5,"upload_id":"up-1"}"#
+        )
+
+        try assertRoundTrip(
+            FileUploadFinishRequest(uploadID: "up-1"),
+            expectedJSON: #"{"upload_id":"up-1"}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadStartRequest(path: "~/Desktop/a.txt"),
+            expectedJSON: #"{"path":"~/Desktop/a.txt"}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadStartResponse(
+                downloadID: "down-1",
+                path: "/Users/admin/Desktop/a.txt",
+                bytes: 11,
+                sha256: "abc"
+            ),
+            expectedJSON: #"{"bytes":11,"download_id":"down-1","path":"/Users/admin/Desktop/a.txt","sha256":"abc"}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadChunkRequest(downloadID: "down-1", offset: 5, length: 6),
+            expectedJSON: #"{"download_id":"down-1","length":6,"offset":5}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadChunkResponse(
+                downloadID: "down-1",
+                offset: 5,
+                base64: "IHdvcmxk",
+                bytes: 6,
+                sha256: "def",
+                eof: true
+            ),
+            expectedJSON: #"{"base64":"IHdvcmxk","bytes":6,"download_id":"down-1","eof":true,"offset":5,"sha256":"def"}"#
+        )
+
+        try assertRoundTrip(
+            FileDownloadFinishRequest(downloadID: "down-1"),
+            expectedJSON: #"{"download_id":"down-1"}"#
+        )
+
+        try assertRoundTrip(
+            FileTransferResponse(path: "/Users/admin/Desktop/a.txt", bytes: 11, sha256: "abc"),
+            expectedJSON: #"{"bytes":11,"path":"/Users/admin/Desktop/a.txt","sha256":"abc"}"#
+        )
+    }
+
     func testErrorResponseRoundTrip() throws {
         try assertRoundTrip(
             ErrorResponse(

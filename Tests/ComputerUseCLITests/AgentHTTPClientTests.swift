@@ -43,6 +43,84 @@ func agentHTTPClientBuildsExpectedRequests() throws {
                 ))
             )
         ),
+        .init(
+            method: "POST",
+            path: "/files/upload/start",
+            body: #"{"create_directories":true,"expected_bytes":5,"overwrite":true,"path":"~/Desktop/a.txt","sha256":"abc"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileUploadStartResponse(
+                    uploadID: "up-1",
+                    path: "/Users/admin/Desktop/a.txt"
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
+            path: "/files/upload/chunk",
+            body: #"{"base64":"aGVsbG8=","offset":0,"sha256":"def","upload_id":"up-1"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileUploadChunkResponse(
+                    uploadID: "up-1",
+                    offset: 0,
+                    bytes: 5,
+                    receivedBytes: 5
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
+            path: "/files/upload/finish",
+            body: #"{"upload_id":"up-1"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileTransferResponse(
+                    path: "/Users/admin/Desktop/a.txt",
+                    bytes: 5,
+                    sha256: "abc"
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
+            path: "/files/download/start",
+            body: #"{"path":"~/Desktop/a.txt"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileDownloadStartResponse(
+                    downloadID: "down-1",
+                    path: "/Users/admin/Desktop/a.txt",
+                    bytes: 5,
+                    sha256: "abc"
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
+            path: "/files/download/chunk",
+            body: #"{"download_id":"down-1","length":5,"offset":0}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(FileDownloadChunkResponse(
+                    downloadID: "down-1",
+                    offset: 0,
+                    base64: "aGVsbG8=",
+                    bytes: 5,
+                    sha256: "def",
+                    eof: true
+                ))
+            )
+        ),
+        .init(
+            method: "POST",
+            path: "/files/download/finish",
+            body: #"{"download_id":"down-1"}"#,
+            response: AgentHTTPTransportResponse(
+                statusCode: 200,
+                body: try AgentProtocolJSON.encode(ActionResponse())
+            )
+        ),
     ])
     let client = AgentHTTPClient(transport: transport)
     let baseURL = try #require(URL(string: "http://127.0.0.1:46000"))
@@ -58,6 +136,51 @@ func agentHTTPClientBuildsExpectedRequests() throws {
         request: StateRequest(bundleID: "com.apple.TextEdit")
     )
     #expect(state.snapshotID == "snap-001")
+
+    let upload = try client.startFileUpload(
+        baseURL: baseURL,
+        request: FileUploadStartRequest(
+            path: "~/Desktop/a.txt",
+            expectedBytes: 5,
+            sha256: "abc"
+        )
+    )
+    #expect(upload.uploadID == "up-1")
+
+    let uploadChunk = try client.uploadFileChunk(
+        baseURL: baseURL,
+        request: FileUploadChunkRequest(
+            uploadID: "up-1",
+            offset: 0,
+            base64: "aGVsbG8=",
+            sha256: "def"
+        )
+    )
+    #expect(uploadChunk.receivedBytes == 5)
+
+    let uploadResult = try client.finishFileUpload(
+        baseURL: baseURL,
+        request: FileUploadFinishRequest(uploadID: "up-1")
+    )
+    #expect(uploadResult.path == "/Users/admin/Desktop/a.txt")
+
+    let download = try client.startFileDownload(
+        baseURL: baseURL,
+        request: FileDownloadStartRequest(path: "~/Desktop/a.txt")
+    )
+    #expect(download.downloadID == "down-1")
+
+    let downloadChunk = try client.downloadFileChunk(
+        baseURL: baseURL,
+        request: FileDownloadChunkRequest(downloadID: "down-1", offset: 0, length: 5)
+    )
+    #expect(downloadChunk.eof)
+
+    let downloadFinish = try client.finishFileDownload(
+        baseURL: baseURL,
+        request: FileDownloadFinishRequest(downloadID: "down-1")
+    )
+    #expect(downloadFinish.ok)
     #expect(transport.isExhausted)
 }
 

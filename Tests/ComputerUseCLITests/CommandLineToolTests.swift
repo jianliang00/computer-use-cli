@@ -1,6 +1,7 @@
 import AgentProtocol
 import ComputerUseCLI
 import ContainerBridge
+import CryptoKit
 import Foundation
 import Testing
 
@@ -438,6 +439,88 @@ func agentCommandsUseContainerExecURLForDarwinSandboxesWithoutPublishedPorts() t
 }
 
 @Test
+func fileCommandsTransferChunksThroughAgent() throws {
+    let homeDirectory = try temporaryDirectory()
+    let hostDirectory = try temporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: homeDirectory)
+        try? FileManager.default.removeItem(at: hostDirectory)
+    }
+
+    let sourceURL = hostDirectory.appendingPathComponent("hello.txt")
+    let sourceData = Data("hello world".utf8)
+    try sourceData.write(to: sourceURL)
+    let pulledURL = hostDirectory.appendingPathComponent("pulled.txt")
+
+    let bridge = StubContainerBridge()
+    let agentClient = StubAgentClient()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_290) },
+        containerBridge: bridge,
+        agentClient: agentClient
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    let push = try tool.run(arguments: [
+        "files",
+        "push",
+        "--machine", "demo",
+        "--src", sourceURL.path,
+        "--dest", "~/Desktop/hello.txt",
+        "--chunk-size", "5",
+    ])
+
+    #expect(push.contains("\"direction\" : \"push\""))
+    #expect(push.contains("\"chunks\" : 3"))
+    #expect(agentClient.uploadStartRequests == [
+        FileUploadStartRequest(
+            path: "~/Desktop/hello.txt",
+            expectedBytes: Int64(sourceData.count),
+            sha256: sha256Hex(sourceData)
+        ),
+    ])
+    #expect(agentClient.uploadChunkRequests.map(\.offset) == [0, 5, 10])
+    #expect(agentClient.uploadChunkRequests.compactMap { Data(base64Encoded: $0.base64) } == [
+        Data("hello".utf8),
+        Data(" worl".utf8),
+        Data("d".utf8),
+    ])
+    #expect(agentClient.uploadFinishRequests == [FileUploadFinishRequest(uploadID: "upload-001")])
+
+    try Data("old data".utf8).write(to: pulledURL)
+    let pull = try tool.run(arguments: [
+        "files",
+        "pull",
+        "--machine", "demo",
+        "--src", "~/Desktop/remote.txt",
+        "--dest", pulledURL.path,
+        "--chunk-size", "4",
+    ])
+
+    #expect(pull.contains("\"direction\" : \"pull\""))
+    #expect(pull.contains("\"chunks\" : 3"))
+    #expect(agentClient.downloadStartRequests == [
+        FileDownloadStartRequest(path: "~/Desktop/remote.txt"),
+    ])
+    #expect(agentClient.downloadChunkRequests.map(\.offset) == [0, 4, 8])
+    #expect(agentClient.downloadFinishRequests == [FileDownloadFinishRequest(downloadID: "download-001")])
+    #expect(try Data(contentsOf: pulledURL) == agentClient.downloadData)
+}
+
+@Test
 func runtimeInfoReportsProjectOwnedContainerSDKRoot() throws {
     let root = URL(fileURLWithPath: "/tmp/computer-use-runtime-test")
     let layout = ContainerRuntimeLayout(version: "1.2.3", root: root)
@@ -658,6 +741,12 @@ private func temporaryDirectory() throws -> URL {
     return base
 }
 
+private func sha256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
+}
+
 private final class RecordingContainerRuntimeBootstrapper: ContainerRuntimeBootstrapping, @unchecked Sendable {
     private(set) var preparedLayouts: [ContainerRuntimeLayout] = []
 
@@ -873,10 +962,18 @@ private final class RootMismatchUntilRestartBridge: ContainerRuntimeBridging, @u
 private final class StubAgentClient: AgentClienting, @unchecked Sendable {
     private(set) var baseURLs: [URL] = []
     private(set) var stateRequests: [StateRequest] = []
+    private(set) var uploadStartRequests: [FileUploadStartRequest] = []
+    private(set) var uploadChunkRequests: [FileUploadChunkRequest] = []
+    private(set) var uploadFinishRequests: [FileUploadFinishRequest] = []
+    private(set) var downloadStartRequests: [FileDownloadStartRequest] = []
+    private(set) var downloadChunkRequests: [FileDownloadChunkRequest] = []
+    private(set) var downloadFinishRequests: [FileDownloadFinishRequest] = []
     private(set) var clickRequests: [ClickActionRequest] = []
     private(set) var typeRequests: [TypeActionRequest] = []
     private(set) var keyRequests: [KeyActionRequest] = []
     private(set) var scrollRequests: [ScrollActionRequest] = []
+    let downloadData = Data("guest data".utf8)
+    private var uploadedData = Data()
 
     func health(baseURL: URL) throws -> HealthResponse {
         baseURLs.append(baseURL)
@@ -915,6 +1012,69 @@ private final class StubAgentClient: AgentClienting, @unchecked Sendable {
             screenshot: ScreenshotPayload(mimeType: "image/png", base64: "ZmFrZQ=="),
             axTree: AXTree(rootID: "root", nodes: [])
         )
+    }
+
+    func startFileUpload(baseURL: URL, request: FileUploadStartRequest) throws -> FileUploadStartResponse {
+        baseURLs.append(baseURL)
+        uploadStartRequests.append(request)
+        uploadedData = Data()
+        return FileUploadStartResponse(uploadID: "upload-001", path: request.path)
+    }
+
+    func uploadFileChunk(baseURL: URL, request: FileUploadChunkRequest) throws -> FileUploadChunkResponse {
+        baseURLs.append(baseURL)
+        uploadChunkRequests.append(request)
+        let chunk = Data(base64Encoded: request.base64) ?? Data()
+        uploadedData.append(chunk)
+        return FileUploadChunkResponse(
+            uploadID: request.uploadID,
+            offset: request.offset,
+            bytes: Int64(chunk.count),
+            receivedBytes: Int64(uploadedData.count)
+        )
+    }
+
+    func finishFileUpload(baseURL: URL, request: FileUploadFinishRequest) throws -> FileTransferResponse {
+        baseURLs.append(baseURL)
+        uploadFinishRequests.append(request)
+        return FileTransferResponse(
+            path: uploadStartRequests.last?.path ?? "",
+            bytes: Int64(uploadedData.count),
+            sha256: uploadStartRequests.last?.sha256 ?? sha256Hex(uploadedData)
+        )
+    }
+
+    func startFileDownload(baseURL: URL, request: FileDownloadStartRequest) throws -> FileDownloadStartResponse {
+        baseURLs.append(baseURL)
+        downloadStartRequests.append(request)
+        return FileDownloadStartResponse(
+            downloadID: "download-001",
+            path: request.path,
+            bytes: Int64(downloadData.count),
+            sha256: sha256Hex(downloadData)
+        )
+    }
+
+    func downloadFileChunk(baseURL: URL, request: FileDownloadChunkRequest) throws -> FileDownloadChunkResponse {
+        baseURLs.append(baseURL)
+        downloadChunkRequests.append(request)
+        let start = Int(request.offset)
+        let end = min(start + request.length, downloadData.count)
+        let chunk = start < end ? downloadData.subdata(in: start..<end) : Data()
+        return FileDownloadChunkResponse(
+            downloadID: request.downloadID,
+            offset: request.offset,
+            base64: chunk.base64EncodedString(),
+            bytes: Int64(chunk.count),
+            sha256: sha256Hex(chunk),
+            eof: end >= downloadData.count
+        )
+    }
+
+    func finishFileDownload(baseURL: URL, request: FileDownloadFinishRequest) throws -> ActionResponse {
+        baseURLs.append(baseURL)
+        downloadFinishRequests.append(request)
+        return ActionResponse()
     }
 
     func click(baseURL: URL, request: ClickActionRequest) throws -> ActionResponse {

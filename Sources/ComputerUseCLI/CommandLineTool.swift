@@ -1,9 +1,13 @@
 import AgentProtocol
 import ContainerBridge
+import CryptoKit
 import Darwin
 import Foundation
 
 public struct CommandLineTool {
+    private static let defaultFileChunkSize = 64 * 1024
+
+    private let fileManager: FileManager
     private let machineService: MachineService
     private let agentClient: any AgentClienting
     private let containerRuntimeLayout: ContainerRuntimeLayout
@@ -33,6 +37,7 @@ public struct CommandLineTool {
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
+        self.fileManager = fileManager
         self.machineService = MachineService(
             store: store,
             containerBridge: bridge,
@@ -79,6 +84,8 @@ public struct CommandLineTool {
             return try handleApps(arguments: Array(arguments.dropFirst()))
         case "state":
             return try handleState(arguments: Array(arguments.dropFirst()))
+        case "file", "files":
+            return try handleFiles(arguments: Array(arguments.dropFirst()))
         case "action", "actions":
             return try handleAction(arguments: Array(arguments.dropFirst()))
         case "help", "--help", "-h":
@@ -274,6 +281,215 @@ public struct CommandLineTool {
         default:
             throw CLIError.unknownSubcommand("state", subcommand)
         }
+    }
+
+    private func handleFiles(arguments: [String]) throws -> String {
+        guard let subcommand = arguments.first else {
+            throw CLIError.missingSubcommand("files")
+        }
+
+        let flags = try FlagParser(arguments: Array(arguments.dropFirst())).parse()
+        let name = try flags.requiredValue(for: "--machine")
+        let chunkSize = try fileChunkSize(from: flags)
+        let overwrite = try flags.optionalBoolValue(for: "--overwrite") ?? true
+        let createDirectories = try flags.optionalBoolValue(for: "--create-directories") ?? true
+
+        switch subcommand {
+        case "push":
+            return try JSONOutput.render(pushFile(
+                machineName: name,
+                sourcePath: try flags.requiredValue(for: "--src"),
+                destinationPath: try flags.requiredValue(for: "--dest"),
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            ))
+        case "pull":
+            return try JSONOutput.render(pullFile(
+                machineName: name,
+                sourcePath: try flags.requiredValue(for: "--src"),
+                destinationPath: try flags.requiredValue(for: "--dest"),
+                chunkSize: chunkSize,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            ))
+        default:
+            throw CLIError.unknownSubcommand("files", subcommand)
+        }
+    }
+
+    private func pushFile(
+        machineName: String,
+        sourcePath: String,
+        destinationPath: String,
+        chunkSize: Int,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws -> FileTransferReport {
+        let sourceURL = try hostURL(from: sourcePath)
+        try requireRegularHostFile(sourceURL, flag: "--src")
+
+        let digest = try fileDigest(at: sourceURL)
+        let baseURL = try agentBaseURL(forMachine: machineName)
+        let upload = try agentClient.startFileUpload(
+            baseURL: baseURL,
+            request: FileUploadStartRequest(
+                path: destinationPath,
+                expectedBytes: digest.bytes,
+                sha256: digest.sha256,
+                overwrite: overwrite,
+                createDirectories: createDirectories
+            )
+        )
+
+        let handle = try FileHandle(forReadingFrom: sourceURL)
+        defer {
+            try? handle.close()
+        }
+
+        var offset: Int64 = 0
+        var chunks = 0
+        while let chunk = try handle.read(upToCount: chunkSize), chunk.isEmpty == false {
+            let response = try agentClient.uploadFileChunk(
+                baseURL: baseURL,
+                request: FileUploadChunkRequest(
+                    uploadID: upload.uploadID,
+                    offset: offset,
+                    base64: chunk.base64EncodedString(),
+                    sha256: sha256Hex(chunk)
+                )
+            )
+            let nextOffset = offset + Int64(chunk.count)
+            guard response.offset == offset,
+                  response.bytes == Int64(chunk.count),
+                  response.receivedBytes == nextOffset
+            else {
+                throw CLIError.fileTransferFailed("agent returned inconsistent upload progress")
+            }
+
+            offset = nextOffset
+            chunks += 1
+        }
+
+        guard offset == digest.bytes else {
+            throw CLIError.fileTransferFailed("read \(offset) bytes, expected \(digest.bytes)")
+        }
+
+        let finished = try agentClient.finishFileUpload(
+            baseURL: baseURL,
+            request: FileUploadFinishRequest(uploadID: upload.uploadID)
+        )
+        try validateTransferDigest(finished, expected: digest)
+
+        return FileTransferReport(
+            direction: "push",
+            machine: machineName,
+            source: sourceURL.path,
+            destination: finished.path,
+            bytes: finished.bytes,
+            sha256: finished.sha256,
+            chunks: chunks
+        )
+    }
+
+    private func pullFile(
+        machineName: String,
+        sourcePath: String,
+        destinationPath: String,
+        chunkSize: Int,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws -> FileTransferReport {
+        let destinationURL = try hostURL(from: destinationPath)
+        try prepareHostDestination(
+            destinationURL,
+            overwrite: overwrite,
+            createDirectories: createDirectories
+        )
+
+        let baseURL = try agentBaseURL(forMachine: machineName)
+        let download = try agentClient.startFileDownload(
+            baseURL: baseURL,
+            request: FileDownloadStartRequest(path: sourcePath)
+        )
+
+        let parentURL = destinationURL.deletingLastPathComponent()
+        let tempURL = parentURL.appendingPathComponent(
+            ".\(destinationURL.lastPathComponent).computer-use-\(UUID().uuidString)"
+        )
+        guard fileManager.createFile(atPath: tempURL.path, contents: nil) else {
+            throw CLIError.fileTransferFailed("unable to create temporary destination \(tempURL.path)")
+        }
+
+        var offset: Int64 = 0
+        var chunks = 0
+        var hasher = SHA256()
+        let handle = try FileHandle(forWritingTo: tempURL)
+
+        do {
+            while offset < download.bytes {
+                let length = Int(min(Int64(chunkSize), download.bytes - offset))
+                let response = try agentClient.downloadFileChunk(
+                    baseURL: baseURL,
+                    request: FileDownloadChunkRequest(
+                        downloadID: download.downloadID,
+                        offset: offset,
+                        length: length
+                    )
+                )
+                guard response.offset == offset else {
+                    throw CLIError.fileTransferFailed("agent returned chunk offset \(response.offset), expected \(offset)")
+                }
+                guard let chunk = Data(base64Encoded: response.base64) else {
+                    throw CLIError.fileTransferFailed("agent returned invalid chunk base64")
+                }
+                guard Int64(chunk.count) == response.bytes else {
+                    throw CLIError.fileTransferFailed("agent returned inconsistent chunk byte count")
+                }
+                guard sha256Hex(chunk) == response.sha256 else {
+                    throw CLIError.fileTransferFailed("agent returned chunk with invalid sha256")
+                }
+
+                try handle.write(contentsOf: chunk)
+                hasher.update(data: chunk)
+                offset += Int64(chunk.count)
+                chunks += 1
+
+                if response.eof && offset < download.bytes {
+                    throw CLIError.fileTransferFailed("agent ended download before the expected byte count")
+                }
+            }
+
+            try handle.close()
+
+            let actualDigest = LocalFileDigest(bytes: offset, sha256: hex(hasher.finalize()))
+            let expectedDigest = LocalFileDigest(bytes: download.bytes, sha256: download.sha256)
+            try validateTransferDigest(
+                FileTransferResponse(path: download.path, bytes: actualDigest.bytes, sha256: actualDigest.sha256),
+                expected: expectedDigest
+            )
+
+            _ = try agentClient.finishFileDownload(
+                baseURL: baseURL,
+                request: FileDownloadFinishRequest(downloadID: download.downloadID)
+            )
+
+            try moveDownloadedFile(from: tempURL, to: destinationURL)
+        } catch {
+            try? handle.close()
+            try? fileManager.removeItem(at: tempURL)
+            throw error
+        }
+
+        return FileTransferReport(
+            direction: "pull",
+            machine: machineName,
+            source: download.path,
+            destination: destinationURL.path,
+            bytes: download.bytes,
+            sha256: download.sha256,
+            chunks: chunks
+        )
     }
 
     private func handleAction(arguments: [String]) throws -> String {
@@ -523,6 +739,135 @@ public struct CommandLineTool {
         return direction
     }
 
+    private func fileChunkSize(from flags: ParsedFlags) throws -> Int {
+        let chunkSize = try flags.optionalIntValue(for: "--chunk-size") ?? Self.defaultFileChunkSize
+        guard chunkSize > 0 else {
+            throw CLIError.invalidIntegerFlag("--chunk-size", "\(chunkSize)")
+        }
+        return chunkSize
+    }
+
+    private func hostURL(from path: String) throws -> URL {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else {
+            throw CLIError.missingValue("path")
+        }
+
+        if trimmed == "~" {
+            return fileManager.homeDirectoryForCurrentUser.standardizedFileURL
+        }
+
+        if trimmed.hasPrefix("~/") {
+            return fileManager.homeDirectoryForCurrentUser
+                .appendingPathComponent(String(trimmed.dropFirst(2)))
+                .standardizedFileURL
+        }
+
+        if trimmed.hasPrefix("/") {
+            return URL(fileURLWithPath: trimmed).standardizedFileURL
+        }
+
+        return URL(fileURLWithPath: fileManager.currentDirectoryPath)
+            .appendingPathComponent(trimmed)
+            .standardizedFileURL
+    }
+
+    private func requireRegularHostFile(_ url: URL, flag: String) throws {
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw CLIError.fileTransferFailed("\(flag) does not exist: \(url.path)")
+        }
+        guard isDirectory.boolValue == false else {
+            throw CLIError.fileTransferFailed("directory transfer is not supported yet: \(url.path)")
+        }
+    }
+
+    private func prepareHostDestination(
+        _ url: URL,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws {
+        var isDirectory = ObjCBool(false)
+        if fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            guard isDirectory.boolValue == false else {
+                throw CLIError.fileTransferFailed("destination is a directory: \(url.path)")
+            }
+            guard overwrite else {
+                throw CLIError.fileTransferFailed("destination already exists: \(url.path)")
+            }
+        }
+
+        let parent = url.deletingLastPathComponent()
+        if createDirectories {
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+        } else if fileManager.fileExists(atPath: parent.path) == false {
+            throw CLIError.fileTransferFailed("destination parent does not exist: \(parent.path)")
+        }
+    }
+
+    private func moveDownloadedFile(from tempURL: URL, to destinationURL: URL) throws {
+        guard fileManager.fileExists(atPath: destinationURL.path) else {
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+            return
+        }
+
+        let backupURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(destinationURL.lastPathComponent).computer-use-backup-\(UUID().uuidString)")
+        try fileManager.moveItem(at: destinationURL, to: backupURL)
+
+        do {
+            try fileManager.moveItem(at: tempURL, to: destinationURL)
+            try? fileManager.removeItem(at: backupURL)
+        } catch {
+            if fileManager.fileExists(atPath: destinationURL.path) == false {
+                try? fileManager.moveItem(at: backupURL, to: destinationURL)
+            }
+            throw error
+        }
+    }
+
+    private func fileDigest(at url: URL) throws -> LocalFileDigest {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer {
+            try? handle.close()
+        }
+
+        var hasher = SHA256()
+        var bytes: Int64 = 0
+
+        while let data = try handle.read(upToCount: 1024 * 1024), data.isEmpty == false {
+            hasher.update(data: data)
+            bytes += Int64(data.count)
+        }
+
+        return LocalFileDigest(bytes: bytes, sha256: hex(hasher.finalize()))
+    }
+
+    private func validateTransferDigest(
+        _ response: FileTransferResponse,
+        expected: LocalFileDigest
+    ) throws {
+        guard response.bytes == expected.bytes else {
+            throw CLIError.fileTransferFailed(
+                "transfer returned \(response.bytes) bytes, expected \(expected.bytes)"
+            )
+        }
+        guard response.sha256 == expected.sha256 else {
+            throw CLIError.fileTransferFailed(
+                "transfer sha256 \(response.sha256), expected \(expected.sha256)"
+            )
+        }
+    }
+
+    private func sha256Hex(_ data: Data) -> String {
+        hex(SHA256.hash(data: data))
+    }
+
+    private func hex<Digest: Sequence>(_ digest: Digest) -> String where Digest.Element == UInt8 {
+        digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     private func usage() -> String {
         """
         Usage:
@@ -542,6 +887,8 @@ public struct CommandLineTool {
           computer-use permissions request --machine <name>
           computer-use apps list --machine <name>
           computer-use state get --machine <name> [--app <name-or-bundle-id> | --bundle-id <bundle-id>]
+          computer-use files push --machine <name> --src <host-path> --dest <guest-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
+          computer-use files pull --machine <name> --src <guest-path> --dest <host-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
           computer-use action click --machine <name> [--app <app>] (--x <x> --y <y> | --snapshot-id <id> --element-id <id> | [--snapshot-id <id>] --element-index <n>)
           computer-use action type --machine <name> [--app <app>] --text <text>
           computer-use action key --machine <name> [--app <app>] --key <key-or-combo>
@@ -667,6 +1014,39 @@ public struct AgentDoctorReport: Encodable, Equatable, Sendable {
     }
 }
 
+public struct FileTransferReport: Encodable, Equatable, Sendable {
+    public let direction: String
+    public let machine: String
+    public let source: String
+    public let destination: String
+    public let bytes: Int64
+    public let sha256: String
+    public let chunks: Int
+
+    public init(
+        direction: String,
+        machine: String,
+        source: String,
+        destination: String,
+        bytes: Int64,
+        sha256: String,
+        chunks: Int
+    ) {
+        self.direction = direction
+        self.machine = machine
+        self.source = source
+        self.destination = destination
+        self.bytes = bytes
+        self.sha256 = sha256
+        self.chunks = chunks
+    }
+}
+
+private struct LocalFileDigest: Equatable {
+    let bytes: Int64
+    let sha256: String
+}
+
 struct FlagParser {
     private let arguments: [String]
 
@@ -763,6 +1143,21 @@ struct ParsedFlags {
 
         return value
     }
+
+    func optionalBoolValue(for key: String) throws -> Bool? {
+        guard let rawValue = values[key] else {
+            return nil
+        }
+
+        switch rawValue.lowercased() {
+        case "true", "yes", "1":
+            return true
+        case "false", "no", "0":
+            return false
+        default:
+            throw CLIError.invalidFlagValue(key, rawValue)
+        }
+    }
 }
 
 public enum CLIError: Error, LocalizedError, Equatable {
@@ -777,6 +1172,7 @@ public enum CLIError: Error, LocalizedError, Equatable {
     case invalidFlagCombination(String)
     case machineNotRunning(String, String)
     case sandboxNotCreated(String)
+    case fileTransferFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -802,6 +1198,8 @@ public enum CLIError: Error, LocalizedError, Equatable {
             "machine \(name) is \(status), not running"
         case let .sandboxNotCreated(name):
             "machine \(name) does not have a created sandbox"
+        case let .fileTransferFailed(message):
+            message
         }
     }
 }

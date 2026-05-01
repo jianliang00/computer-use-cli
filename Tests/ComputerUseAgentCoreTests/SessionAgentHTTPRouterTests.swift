@@ -1,6 +1,7 @@
 import AgentProtocol
 import ComputerUseAgentApp
 import ComputerUseAgentCore
+import CryptoKit
 import Foundation
 import Testing
 
@@ -132,6 +133,111 @@ func sessionAgentHTTPRouterMapsStateAndActions() async throws {
 }
 
 @Test
+func sessionAgentHTTPRouterTransfersFilesInChunks() async throws {
+    let guestHome = try routerTemporaryDirectory()
+    let guestTemporaryDirectory = try routerTemporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: guestHome)
+        try? FileManager.default.removeItem(at: guestTemporaryDirectory)
+    }
+
+    let router = SessionAgentHTTPRouter(
+        agent: StubSessionAgent(),
+        fileTransferHomeDirectory: guestHome,
+        fileTransferTemporaryDirectory: guestTemporaryDirectory
+    )
+    let payload = Data("hello world".utf8)
+    let payloadSHA256 = sha256Hex(payload)
+
+    let startUploadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/start",
+        body: try AgentProtocolJSON.encode(FileUploadStartRequest(
+            path: "~/Documents/hello.txt",
+            expectedBytes: Int64(payload.count),
+            sha256: payloadSHA256,
+            overwrite: false,
+            createDirectories: true
+        ))
+    ))
+    #expect(startUploadResponse.statusCode == 200)
+    let upload = try AgentProtocolJSON.decode(FileUploadStartResponse.self, from: startUploadResponse.body)
+    #expect(upload.path == guestHome.appendingPathComponent("Documents/hello.txt").path)
+
+    let firstChunk = Data(payload.prefix(5))
+    let firstChunkResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/chunk",
+        body: try AgentProtocolJSON.encode(FileUploadChunkRequest(
+            uploadID: upload.uploadID,
+            offset: 0,
+            base64: firstChunk.base64EncodedString(),
+            sha256: sha256Hex(firstChunk)
+        ))
+    ))
+    #expect(firstChunkResponse.statusCode == 200)
+
+    let secondChunk = Data(payload.dropFirst(5))
+    let secondChunkResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/chunk",
+        body: try AgentProtocolJSON.encode(FileUploadChunkRequest(
+            uploadID: upload.uploadID,
+            offset: Int64(firstChunk.count),
+            base64: secondChunk.base64EncodedString(),
+            sha256: sha256Hex(secondChunk)
+        ))
+    ))
+    #expect(secondChunkResponse.statusCode == 200)
+
+    let finishUploadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/upload/finish",
+        body: try AgentProtocolJSON.encode(FileUploadFinishRequest(uploadID: upload.uploadID))
+    ))
+    #expect(finishUploadResponse.statusCode == 200)
+    let uploadResult = try AgentProtocolJSON.decode(FileTransferResponse.self, from: finishUploadResponse.body)
+    #expect(uploadResult.bytes == Int64(payload.count))
+    #expect(uploadResult.sha256 == payloadSHA256)
+    #expect(try Data(contentsOf: URL(fileURLWithPath: uploadResult.path)) == payload)
+
+    let startDownloadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/start",
+        body: try AgentProtocolJSON.encode(FileDownloadStartRequest(path: "~/Documents/hello.txt"))
+    ))
+    #expect(startDownloadResponse.statusCode == 200)
+    let download = try AgentProtocolJSON.decode(FileDownloadStartResponse.self, from: startDownloadResponse.body)
+    #expect(download.bytes == Int64(payload.count))
+    #expect(download.sha256 == payloadSHA256)
+
+    let downloadChunkResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/chunk",
+        body: try AgentProtocolJSON.encode(FileDownloadChunkRequest(
+            downloadID: download.downloadID,
+            offset: 0,
+            length: 64
+        ))
+    ))
+    #expect(downloadChunkResponse.statusCode == 200)
+    let downloadChunk = try AgentProtocolJSON.decode(
+        FileDownloadChunkResponse.self,
+        from: downloadChunkResponse.body
+    )
+    #expect(downloadChunk.eof)
+    #expect(Data(base64Encoded: downloadChunk.base64) == payload)
+    #expect(downloadChunk.sha256 == payloadSHA256)
+
+    let finishDownloadResponse = await router.handle(SessionAgentHTTPRequest(
+        method: .post,
+        path: "/files/download/finish",
+        body: try AgentProtocolJSON.encode(FileDownloadFinishRequest(downloadID: download.downloadID))
+    ))
+    #expect(finishDownloadResponse.statusCode == 200)
+}
+
+@Test
 func sessionAgentHTTPRouterRejectsAutomationWhenPermissionsAreMissing() async throws {
     let agent = StubSessionAgent()
     agent.permissions = PermissionSnapshot(
@@ -150,6 +256,19 @@ func sessionAgentHTTPRouterRejectsAutomationWhenPermissionsAreMissing() async th
     #expect(response.statusCode == 403)
     let error = try AgentProtocolJSON.decode(ErrorResponse.self, from: response.body)
     #expect(error.error.code == .permissionDenied)
+}
+
+private func routerTemporaryDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+private func sha256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data)
+        .map { String(format: "%02x", $0) }
+        .joined()
 }
 
 private final class StubSessionAgent: ComputerUseSessionAgent, @unchecked Sendable {

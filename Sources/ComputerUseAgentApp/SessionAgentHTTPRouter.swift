@@ -38,13 +38,20 @@ public struct SessionAgentHTTPResponse: Equatable, Sendable {
 public final class SessionAgentHTTPRouter: Sendable {
     private let configuration: SessionAgentConfiguration
     private let agent: any ComputerUseSessionAgent
+    private let fileTransfers: FileTransferCoordinator
 
     public init(
         configuration: SessionAgentConfiguration = .guestDefault,
-        agent: any ComputerUseSessionAgent
+        agent: any ComputerUseSessionAgent,
+        fileTransferHomeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        fileTransferTemporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) {
         self.configuration = configuration
         self.agent = agent
+        self.fileTransfers = FileTransferCoordinator(
+            homeDirectory: fileTransferHomeDirectory,
+            temporaryDirectory: fileTransferTemporaryDirectory
+        )
     }
 
     public func handle(_ request: SessionAgentHTTPRequest) async -> SessionAgentHTTPResponse {
@@ -63,6 +70,18 @@ public final class SessionAgentHTTPRouter: Sendable {
             case (.post, "/state"):
                 try await requireAutomationPermissions()
                 return try await state(request)
+            case (.post, "/files/upload/start"):
+                return try fileUploadStart(request)
+            case (.post, "/files/upload/chunk"):
+                return try fileUploadChunk(request)
+            case (.post, "/files/upload/finish"):
+                return try fileUploadFinish(request)
+            case (.post, "/files/download/start"):
+                return try fileDownloadStart(request)
+            case (.post, "/files/download/chunk"):
+                return try fileDownloadChunk(request)
+            case (.post, "/files/download/finish"):
+                return try fileDownloadFinish(request)
             case (.post, "/actions/click"):
                 try await requireAutomationPermissions()
                 return try await click(request)
@@ -97,6 +116,8 @@ public final class SessionAgentHTTPRouter: Sendable {
             return appActivationError(activationError)
         } catch let cacheError as SnapshotCacheError {
             return snapshotCacheError(cacheError)
+        } catch let fileTransferError as FileTransferCoordinatorError {
+            return self.fileTransferError(fileTransferError)
         } catch let coreError as ComputerUseAgentCoreError {
             return unsupported(coreError.localizedDescription)
         } catch let decodingError as DecodingError {
@@ -179,6 +200,36 @@ public final class SessionAgentHTTPRouter: Sendable {
             axTreeText: readableAXTree(root: snapshot.accessibilityRoot),
             focusedElement: focusedElement
         ))
+    }
+
+    private func fileUploadStart(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let uploadRequest = try decode(FileUploadStartRequest.self, from: request)
+        return try json(fileTransfers.startUpload(uploadRequest))
+    }
+
+    private func fileUploadChunk(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let uploadRequest = try decode(FileUploadChunkRequest.self, from: request)
+        return try json(fileTransfers.appendUploadChunk(uploadRequest))
+    }
+
+    private func fileUploadFinish(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let uploadRequest = try decode(FileUploadFinishRequest.self, from: request)
+        return try json(fileTransfers.finishUpload(uploadRequest))
+    }
+
+    private func fileDownloadStart(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let downloadRequest = try decode(FileDownloadStartRequest.self, from: request)
+        return try json(fileTransfers.startDownload(downloadRequest))
+    }
+
+    private func fileDownloadChunk(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let downloadRequest = try decode(FileDownloadChunkRequest.self, from: request)
+        return try json(fileTransfers.readDownloadChunk(downloadRequest))
+    }
+
+    private func fileDownloadFinish(_ request: SessionAgentHTTPRequest) throws -> SessionAgentHTTPResponse {
+        let downloadRequest = try decode(FileDownloadFinishRequest.self, from: request)
+        return try json(fileTransfers.finishDownload(downloadRequest))
     }
 
     private func click(_ request: SessionAgentHTTPRequest) async throws -> SessionAgentHTTPResponse {
@@ -508,6 +559,32 @@ public final class SessionAgentHTTPRouter: Sendable {
                     message: "Application \(target) did not expose a key window"
                 )
             }
+        } catch {
+            return SessionAgentHTTPResponse(statusCode: 500)
+        }
+    }
+
+    private func fileTransferError(_ error: FileTransferCoordinatorError) -> SessionAgentHTTPResponse {
+        do {
+            let statusCode: Int
+            switch error {
+            case .invalidRequest:
+                statusCode = 400
+            case .pathOutsideAllowedRoots:
+                statusCode = 403
+            case .notFound, .sessionNotFound:
+                statusCode = 404
+            case .destinationExists, .checksumMismatch, .sizeMismatch:
+                statusCode = 409
+            case .unsupportedDirectory:
+                statusCode = 501
+            }
+
+            return try self.error(
+                statusCode: statusCode,
+                code: .fileTransferFailed,
+                message: error.localizedDescription
+            )
         } catch {
             return SessionAgentHTTPResponse(statusCode: 500)
         }

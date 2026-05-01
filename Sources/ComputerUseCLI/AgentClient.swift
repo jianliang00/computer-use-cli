@@ -8,6 +8,12 @@ public protocol AgentClienting: Sendable {
     func requestPermissions(baseURL: URL) throws -> PermissionsResponse
     func apps(baseURL: URL) throws -> AppsResponse
     func state(baseURL: URL, request: StateRequest) throws -> StateResponse
+    func startFileUpload(baseURL: URL, request: FileUploadStartRequest) throws -> FileUploadStartResponse
+    func uploadFileChunk(baseURL: URL, request: FileUploadChunkRequest) throws -> FileUploadChunkResponse
+    func finishFileUpload(baseURL: URL, request: FileUploadFinishRequest) throws -> FileTransferResponse
+    func startFileDownload(baseURL: URL, request: FileDownloadStartRequest) throws -> FileDownloadStartResponse
+    func downloadFileChunk(baseURL: URL, request: FileDownloadChunkRequest) throws -> FileDownloadChunkResponse
+    func finishFileDownload(baseURL: URL, request: FileDownloadFinishRequest) throws -> ActionResponse
     func click(baseURL: URL, request: ClickActionRequest) throws -> ActionResponse
     func type(baseURL: URL, request: TypeActionRequest) throws -> ActionResponse
     func key(baseURL: URL, request: KeyActionRequest) throws -> ActionResponse
@@ -42,6 +48,48 @@ public struct AgentHTTPClient: AgentClienting {
 
     public func state(baseURL: URL, request: StateRequest) throws -> StateResponse {
         try post("/state", baseURL: baseURL, body: request)
+    }
+
+    public func startFileUpload(
+        baseURL: URL,
+        request: FileUploadStartRequest
+    ) throws -> FileUploadStartResponse {
+        try post("/files/upload/start", baseURL: baseURL, body: request)
+    }
+
+    public func uploadFileChunk(
+        baseURL: URL,
+        request: FileUploadChunkRequest
+    ) throws -> FileUploadChunkResponse {
+        try post("/files/upload/chunk", baseURL: baseURL, body: request)
+    }
+
+    public func finishFileUpload(
+        baseURL: URL,
+        request: FileUploadFinishRequest
+    ) throws -> FileTransferResponse {
+        try post("/files/upload/finish", baseURL: baseURL, body: request)
+    }
+
+    public func startFileDownload(
+        baseURL: URL,
+        request: FileDownloadStartRequest
+    ) throws -> FileDownloadStartResponse {
+        try post("/files/download/start", baseURL: baseURL, body: request)
+    }
+
+    public func downloadFileChunk(
+        baseURL: URL,
+        request: FileDownloadChunkRequest
+    ) throws -> FileDownloadChunkResponse {
+        try post("/files/download/chunk", baseURL: baseURL, body: request)
+    }
+
+    public func finishFileDownload(
+        baseURL: URL,
+        request: FileDownloadFinishRequest
+    ) throws -> ActionResponse {
+        try post("/files/download/finish", baseURL: baseURL, body: request)
     }
 
     public func click(baseURL: URL, request: ClickActionRequest) throws -> ActionResponse {

@@ -28,6 +28,7 @@ public struct AgentErrorCode: RawRepresentable, Hashable, Codable, Sendable, Exp
     public static let appAmbiguous: Self = "app_ambiguous"
     public static let elementNotFound: Self = "element_not_found"
     public static let unsupportedAction: Self = "unsupported_action"
+    public static let fileTransferFailed: Self = "file_transfer_failed"
 }
 
 public struct AgentError: Codable, Sendable, Equatable {
