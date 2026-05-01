@@ -60,6 +60,68 @@ func machineListReturnsStoredMachines() throws {
 }
 
 @Test
+func machineListRefreshesStoredSandboxStatus() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = StubContainerBridge()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_150) },
+        containerBridge: bridge
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    _ = try bridge.stopSandbox(id: "demo")
+
+    let listOutput = try tool.run(arguments: ["machine", "list"])
+    #expect(listOutput.contains("\"name\" : \"demo\""))
+    #expect(listOutput.contains("\"status\" : \"stopped\""))
+    #expect(!listOutput.contains("\"status\" : \"running\""))
+}
+
+@Test
+func machineListMarksMissingSandboxMetadataAsDeleted() throws {
+    let homeDirectory = try temporaryDirectory()
+    let bridge = StubContainerBridge()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_175) },
+        containerBridge: bridge
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    try bridge.removeSandbox(id: "demo")
+
+    let listOutput = try tool.run(arguments: ["machine", "list"])
+    #expect(listOutput.contains("\"name\" : \"demo\""))
+    #expect(listOutput.contains("\"status\" : \"deleted\""))
+    #expect(!listOutput.contains("\"status\" : \"running\""))
+}
+
+@Test
 func machineLifecycleCommandsUseTheBridge() throws {
     let homeDirectory = try temporaryDirectory()
     let bridge = StubContainerBridge()

@@ -56,7 +56,32 @@ public struct MachineService {
     }
 
     public func list() -> [MachineMetadata] {
-        (try? store.allMetadata()) ?? []
+        guard let machines = try? store.allMetadata() else {
+            return []
+        }
+
+        return machines.map { refreshForListing($0) }
+    }
+
+    private func refreshForListing(_ metadata: MachineMetadata) -> MachineMetadata {
+        let lookupID = metadata.sandboxID ?? metadata.name
+
+        do {
+            let details = try containerBridge.inspectSandbox(id: lookupID)
+            let updated = metadata.updating(from: details, updatedAt: now())
+            try? store.update(updated)
+            return updated
+        } catch let error as ContainerBridgeError {
+            if error == .sandboxNotFound(lookupID), metadata.sandboxID != nil {
+                let updated = metadata.updating(status: .deleted, updatedAt: now())
+                try? store.update(updated)
+                return updated
+            }
+
+            return metadata
+        } catch {
+            return metadata
+        }
     }
 
     public func start(
