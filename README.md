@@ -1,5 +1,7 @@
 # Computer Use CLI
 
+[简体中文](README.zh-CN.md)
+
 [![Version](https://img.shields.io/github/v/release/jianliang00/computer-use-cli?sort=semver&label=version)](https://github.com/jianliang00/computer-use-cli/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/jianliang00/computer-use-cli/release.yml?label=build)](https://github.com/jianliang00/computer-use-cli/actions/workflows/release.yml)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple)
