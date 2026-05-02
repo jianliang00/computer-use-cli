@@ -79,6 +79,7 @@ computer-use permissions get --machine demo
 ```bash
 computer-use apps list --machine demo
 computer-use state get --machine demo --app TextEdit
+computer-use state get --machine demo --app TextEdit --screenshot-output ./textedit.png
 ```
 
 发送常见操作：
@@ -89,7 +90,9 @@ computer-use action type --machine demo --app TextEdit --text "hello"
 computer-use action key --machine demo --app TextEdit --key cmd+a
 ```
 
-`state get` 会返回 `snapshot_id`、元素 ID 和元素索引。需要定位到具体元素时，可以使用元素索引：
+`state get` 会返回 `snapshot_id`、元素 ID 和元素索引。可以用
+`--screenshot-output` 将截图 base64 解码成 PNG 文件；需要定位到具体元素时，
+可以使用元素索引：
 
 ```bash
 computer-use action click --machine demo \

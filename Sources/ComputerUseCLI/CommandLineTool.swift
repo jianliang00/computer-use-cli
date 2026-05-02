@@ -277,7 +277,16 @@ public struct CommandLineTool {
                 bundleID: flags.optionalValue(for: "--bundle-id"),
                 app: flags.optionalValue(for: "--app")
             )
-            return try JSONOutput.render(agentClient.state(baseURL: baseURL, request: request))
+            let state = try agentClient.state(baseURL: baseURL, request: request)
+            if let screenshotOutput = flags.optionalValue(for: "--screenshot-output") {
+                try writeDecodedScreenshot(
+                    state.screenshot,
+                    to: screenshotOutput,
+                    overwrite: try flags.optionalBoolValue(for: "--overwrite") ?? true,
+                    createDirectories: try flags.optionalBoolValue(for: "--create-directories") ?? true
+                )
+            }
+            return try JSONOutput.render(state)
         default:
             throw CLIError.unknownSubcommand("state", subcommand)
         }
@@ -893,6 +902,25 @@ public struct CommandLineTool {
         return chunkSize
     }
 
+    private func writeDecodedScreenshot(
+        _ screenshot: ScreenshotPayload,
+        to path: String,
+        overwrite: Bool,
+        createDirectories: Bool
+    ) throws {
+        guard let data = Data(base64Encoded: screenshot.base64) else {
+            throw CLIError.fileTransferFailed("agent returned invalid screenshot base64")
+        }
+
+        let destinationURL = try hostURL(from: path)
+        try prepareHostDestination(
+            destinationURL,
+            overwrite: overwrite,
+            createDirectories: createDirectories
+        )
+        try data.write(to: destinationURL, options: .atomic)
+    }
+
     private func hostURL(from path: String) throws -> URL {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else {
@@ -1195,7 +1223,7 @@ public struct CommandLineTool {
           computer-use permissions get --machine <name>
           computer-use permissions request --machine <name>
           computer-use apps list --machine <name>
-          computer-use state get --machine <name> [--app <name-or-bundle-id> | --bundle-id <bundle-id>]
+          computer-use state get --machine <name> [--app <name-or-bundle-id> | --bundle-id <bundle-id>] [--screenshot-output <host-png>] [--overwrite <true|false>] [--create-directories <true|false>]
           computer-use files push --machine <name> --src <host-file-or-directory> --dest <guest-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
           computer-use files pull --machine <name> --src <guest-file-or-directory> --dest <host-path> [--chunk-size <bytes>] [--overwrite <true|false>] [--create-directories <true|false>]
           computer-use action click --machine <name> [--app <app>] (--x <x> --y <y> | --snapshot-id <id> --element-id <id> | [--snapshot-id <id>] --element-index <n>)

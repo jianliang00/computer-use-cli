@@ -404,6 +404,53 @@ func agentCommandsUseMachineHostPortAndProtocolPayloads() throws {
 }
 
 @Test
+func stateGetCanWriteDecodedScreenshot() throws {
+    let homeDirectory = try temporaryDirectory()
+    let hostDirectory = try temporaryDirectory()
+    defer {
+        try? FileManager.default.removeItem(at: homeDirectory)
+        try? FileManager.default.removeItem(at: hostDirectory)
+    }
+
+    let bridge = StubContainerBridge()
+    let agentClient = StubAgentClient()
+    let tool = CommandLineTool(
+        fileManager: .default,
+        homeDirectory: homeDirectory,
+        now: { Date(timeIntervalSince1970: 1_710_000_260) },
+        containerBridge: bridge,
+        agentClient: agentClient
+    )
+
+    _ = try tool.run(arguments: [
+        "machine",
+        "create",
+        "--name", "demo",
+        "--image", "local/computer-use:authorized",
+    ])
+    _ = try tool.run(arguments: [
+        "machine",
+        "start",
+        "--machine", "demo",
+    ])
+
+    let screenshotURL = hostDirectory
+        .appendingPathComponent("screenshots", isDirectory: true)
+        .appendingPathComponent("state.png")
+    let state = try tool.run(arguments: [
+        "state",
+        "get",
+        "--machine", "demo",
+        "--app", "TextEdit",
+        "--screenshot-output", screenshotURL.path,
+    ])
+
+    #expect(state.contains("\"base64\" : \"ZmFrZQ==\""))
+    #expect(try Data(contentsOf: screenshotURL) == Data("fake".utf8))
+    #expect(agentClient.stateRequests == [StateRequest(app: "TextEdit")])
+}
+
+@Test
 func agentCommandsUseContainerExecURLForDarwinSandboxesWithoutPublishedPorts() throws {
     let homeDirectory = try temporaryDirectory()
     let bridge = ContainerExecSandboxBridge()

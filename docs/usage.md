@@ -158,12 +158,15 @@ Capture state for the frontmost app or a target bundle:
 computer-use state get --machine demo
 computer-use state get --machine demo --app TextEdit
 computer-use state get --machine demo --bundle-id com.apple.TextEdit
+computer-use state get --machine demo --app TextEdit --screenshot-output ./textedit.png
 ```
 
 `state get` returns a screenshot payload, `snapshot_id`, a machine-readable
 `ax_tree`, a readable indexed `ax_tree_text`, and `focused_element` when
 Accessibility reports one. Prefer `--app` for user-facing workflows; keep
 `--bundle-id` for scripts that already target a specific bundle identifier.
+Use `--screenshot-output` to decode the screenshot base64 into a host-side PNG
+file while keeping the JSON response unchanged.
 
 Run coordinate actions:
 

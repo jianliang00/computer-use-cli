@@ -84,6 +84,7 @@ List running apps and capture UI state:
 ```bash
 computer-use apps list --machine demo
 computer-use state get --machine demo --app TextEdit
+computer-use state get --machine demo --app TextEdit --screenshot-output ./textedit.png
 ```
 
 Send basic actions:
@@ -95,6 +96,7 @@ computer-use action key --machine demo --app TextEdit --key cmd+a
 ```
 
 `state get` returns a `snapshot_id`, element IDs, and element indexes. Use
+`--screenshot-output` to decode the screenshot base64 into a PNG file. Use
 element indexes for plugin-style element-targeted actions:
 
 ```bash
