@@ -1,0 +1,4 @@
+interface:
+  display_name: "Computer Use CLI"
+  short_description: "Operate isolated macOS guest automation"
+  default_prompt: "Use $computer-use-cli to create a macOS guest, inspect app state, and run UI actions with the computer-use command."

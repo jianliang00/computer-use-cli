@@ -26,7 +26,7 @@ Use this project when you want to:
 
 - Apple silicon Mac.
 - macOS 15 or newer.
-- A prepared macOS guest image, for example `ghcr.io/jianliang00/computer-use:v0.1`.
+- A prepared macOS guest image, by default `ghcr.io/jianliang00/computer-use:v0.1.6`.
 - Swift 6 only if you are building from source.
 
 The guest image must already be prepared for computer-use and authorized for
@@ -68,7 +68,7 @@ You do not need to install any additional command-line tools before using
 Create and start a guest:
 
 ```bash
-computer-use machine create --name demo --image ghcr.io/jianliang00/computer-use:v0.1
+computer-use machine create --name demo --image ghcr.io/jianliang00/computer-use:v0.1.6
 computer-use machine start --machine demo
 ```
 

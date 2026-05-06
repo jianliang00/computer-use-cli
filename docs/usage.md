@@ -59,10 +59,10 @@ workflows. Normal users should not need to learn or install a separate
 
 ## Machine Lifecycle
 
-Create a machine from an authorized guest image:
+Create a machine from the default authorized guest image:
 
 ```bash
-computer-use machine create --name demo --image local/computer-use:authorized
+computer-use machine create --name demo --image ghcr.io/jianliang00/computer-use:v0.1.6
 computer-use machine start --machine demo
 ```
 

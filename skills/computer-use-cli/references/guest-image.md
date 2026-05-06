@@ -1,18 +1,14 @@
-# Guest Image
+# Guest Image Reference
 
-This document describes the macOS guest image flow used by normal
-`computer-use` runs.
+Use this reference for building, authorizing, validating, packaging, or troubleshooting macOS guest images.
 
 ## Image Layers
 
 The project uses three image layers:
 
-1. Base image: a clean macOS guest image that can boot under the project-owned
-   `container` runtime.
-2. Product image: base image plus `ComputerUseAgent.app`, `bootstrap-agent`,
-   launchd plists, auto-login, and no-sleep configuration.
-3. Authorized image: product image booted once, granted macOS privacy
-   permissions, validated, then packaged for reuse.
+1. Base image: clean macOS guest image that boots under the project-owned `container` runtime.
+2. Product image: base image plus `ComputerUseAgent.app`, `bootstrap-agent`, launchd plists, auto-login, and no-sleep configuration.
+3. Authorized image: product image booted once, granted macOS privacy permissions, validated, then packaged for reuse.
 
 Normal non-debug use should run from:
 
@@ -20,11 +16,11 @@ Normal non-debug use should run from:
 ghcr.io/jianliang00/computer-use:v0.1.6
 ```
 
-Users should not need to install the guest kit manually inside every guest VM.
+Do not tell normal users to install the guest kit manually inside every guest VM.
 
 ## Fixed Guest Layout
 
-The product and authorized images contain:
+Product and authorized images contain:
 
 ```text
 /Applications/ComputerUseAgent.app
@@ -42,10 +38,9 @@ Stable identities:
 - Guest user: `admin`
 - Agent port: `127.0.0.1:7777`
 
-Do not change these after producing an authorized image unless you are prepared
-to re-authorize and rebuild the image.
+Do not change these after producing an authorized image unless the image will be re-authorized and rebuilt. macOS privacy permissions are bound to stable app identity, path, user session, and signing identity.
 
-## Prerequisites
+## Build Product Image
 
 Bootstrap the runtime:
 
@@ -54,23 +49,13 @@ computer-use runtime bootstrap
 computer-use runtime container -- system status
 ```
 
-Prepare or load a base image. The local reference used by the image Dockerfile
-is:
+Prepare or load a base image. The local Dockerfile reference is:
 
 ```text
 local/macos-base:latest
 ```
 
-For production images, use the signed release guest payload. For local
-development, generate the build context from the current checkout:
-
-```bash
-scripts/prepare-computer-use-image-context.sh
-```
-
-## Build The Product Image
-
-Generate the image context:
+If building an image from this checkout, generate the build context first:
 
 ```bash
 scripts/prepare-computer-use-image-context.sh
@@ -92,9 +77,9 @@ The Dockerfile installs the guest payload and configures:
 - `admin/admin` auto-login.
 - LaunchDaemon and LaunchAgent startup.
 - Guest sleep, display sleep, and screensaver password prompts disabled.
-- A keepalive command for runtimes that require a default process.
+- Keepalive command for runtimes that require a default process.
 
-## Authorize The Product Guest
+## Authorize Product Guest
 
 Create and start a temporary authorization machine:
 
@@ -133,7 +118,7 @@ Expected permission state:
 }
 ```
 
-## Validate The Authorized Guest
+## Validate Authorized Guest
 
 Run a minimal smoke before packaging:
 
@@ -151,7 +136,7 @@ Validation criteria:
 - `state get` returns a PNG screenshot and AX tree.
 - At least one basic action returns `ok: true`.
 
-## Package The Authorized Image
+## Package Authorized Image
 
 Package the authorized container directory as a reusable image:
 
@@ -165,8 +150,7 @@ computer-use runtime container -- image load \
   --input /tmp/computer-use-authorized.oci.tar
 ```
 
-If `COMPUTER_USE_CONTAINER_APP_ROOT` is not set, read the default `app_root`
-from:
+If `COMPUTER_USE_CONTAINER_APP_ROOT` is not set, read the default `app_root` from:
 
 ```bash
 computer-use runtime info
@@ -178,7 +162,7 @@ Confirm the image exists:
 computer-use runtime container -- image inspect ghcr.io/jianliang00/computer-use:v0.1.6
 ```
 
-## Verify A Fresh Guest
+## Verify Fresh Guest
 
 Create a new machine from the packaged image:
 
@@ -193,8 +177,7 @@ computer-use apps list --machine authorized-smoke
 computer-use state get --machine authorized-smoke --bundle-id com.apple.finder
 ```
 
-The fresh guest must already be authorized. If either permission is false, do
-not publish that image.
+The fresh guest must already be authorized. If either permission is false, do not publish that image.
 
 ## Troubleshooting
 
@@ -203,19 +186,16 @@ If the agent is unreachable:
 - Confirm the guest booted and auto-logged in as `admin`.
 - Check `/var/run/computer-use/bootstrap-status.json` inside the guest.
 - Check `/Users/admin/Library/Logs/ComputerUseAgent.log` inside the guest.
-- Run `computer-use machine inspect --machine <name>` and note whether the
-  transport is `published_tcp` or `container_exec`.
+- Run `computer-use machine inspect --machine <name>` and note whether transport is `published_tcp` or `container_exec`.
 
 If state capture reports missing permissions:
 
-- Confirm the app path is `/Applications/ComputerUseAgent.app`.
-- Confirm the bundle id is `com.jianliang00.computer-use-cli`.
+- Confirm app path is `/Applications/ComputerUseAgent.app`.
+- Confirm bundle id is `com.jianliang00.computer-use-cli`.
 - Re-grant Accessibility and Screen & System Audio Recording in the guest GUI.
 - Repackage the authorized image only after both permissions are true.
 
 If the macOS guest agent crashes during container start:
 
-- Ensure the image contains the guest agent from the same project-owned
-  guest-runtime version used by the host CLI.
-- Rebuild the product and authorized images from a clean base if the guest
-  image carries an older runtime agent.
+- Ensure the image contains the guest agent from the same project-owned guest-runtime version used by the host CLI.
+- Rebuild product and authorized images from a clean base if the image carries an older runtime agent.

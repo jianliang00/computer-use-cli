@@ -24,7 +24,7 @@
 
 - Apple 芯片 Mac。
 - macOS 15 或更新版本。
-- 已准备好的 macOS 虚拟机镜像，例如 `ghcr.io/jianliang00/computer-use:v0.1`。
+- 已准备好的 macOS 虚拟机镜像，默认使用 `ghcr.io/jianliang00/computer-use:v0.1.6`。
 - 只有从源码构建时才需要 Swift 6。
 
 虚拟机镜像需要预先为 computer-use 配置好，并授予辅助功能和屏幕录制权限。如果需要构建该镜像，请参考 [Guest Image](docs/guest-image.md)。
@@ -63,7 +63,7 @@ computer-use --help
 创建并启动一台虚拟机：
 
 ```bash
-computer-use machine create --name demo --image ghcr.io/jianliang00/computer-use:v0.1
+computer-use machine create --name demo --image ghcr.io/jianliang00/computer-use:v0.1.6
 computer-use machine start --machine demo
 ```
 

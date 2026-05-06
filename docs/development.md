@@ -110,7 +110,7 @@ For guest-image changes, also verify a fresh machine from the authorized image:
 
 ```bash
 computer-use machine create --name authorized-smoke \
-  --image local/computer-use:authorized
+  --image ghcr.io/jianliang00/computer-use:v0.1.6
 computer-use machine start --machine authorized-smoke
 computer-use agent doctor --machine authorized-smoke
 computer-use state get --machine authorized-smoke --app Finder
