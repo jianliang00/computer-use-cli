@@ -4,6 +4,7 @@
 
 [![Version](https://img.shields.io/github/v/release/jianliang00/computer-use-cli?sort=semver&label=version)](https://github.com/jianliang00/computer-use-cli/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/jianliang00/computer-use-cli/release.yml?label=build)](https://github.com/jianliang00/computer-use-cli/actions/workflows/release.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-000000?logo=apple)
 ![Architecture](https://img.shields.io/badge/architecture-Apple%20silicon-lightgrey)
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange?logo=swift)
@@ -159,3 +160,7 @@ swift run computer-use --help
 - [Releasing](docs/releasing.md): signed and notarized release packages.
 - [Development](docs/development.md): local development and validation.
 - [Architecture](docs/architecture.md): technical design.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
